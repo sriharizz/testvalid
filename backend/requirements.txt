@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-docx
+playwright
+groq
+pydantic
+pytest
+httpx
+websockets
+python-multipart

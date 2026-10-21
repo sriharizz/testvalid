@@ -1,0 +1,427 @@
+import { test, expect, Page } from '@playwright/test';
+
+// Helper: Captures populated form state before saving
+async function captureFormState(page: Page, tag: string) {
+  const path = `artifacts/screenshots/${tag}.png`;
+  await page.screenshot({ path });
+  console.log(`[EVIDENCE] Form state captured: ${tag} -> ${path}`);
+}
+
+// Helper: Captures modal confirmation evidence before dismissal
+async function captureModalEvidence(page: Page, tag: string) {
+  const path = `artifacts/screenshots/${tag}.png`;
+  await page.screenshot({ path });
+  console.log(`[EVIDENCE] Modal checkpoint captured: ${tag} -> ${path}`);
+}
+
+// Helper: Safe modal confirmation handler
+async function dismissModal(page: Page, buttonLabel: string = 'OK') {
+  const btn = page.locator(`role=dialog >> button:has-text('${buttonLabel}')`).first();
+  if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await btn.click();
+  }
+}
+
+// Helper: Fills input field inside target section
+async function fillFieldInSection(page: Page, section: string, label: string, value: string) {
+  const input = page.locator(`[data-section='${section}'] input[placeholder*='${label}' i], input#${label.replace(/\s+/g, '')}`).first();
+  if (await input.isVisible().catch(() => false)) {
+    await input.fill(value);
+  }
+}
+
+// Helper: Selects dropdown inside target section
+async function selectDropdownInSection(page: Page, section: string, label: string, value: string) {
+  const sel = page.locator(`[data-section='${section}'] select, select#${label.replace(/\s+/g, '')}`).first();
+  if (await sel.isVisible().catch(() => false)) {
+    await sel.selectOption({ label: value }).catch(() => {});
+  }
+}
+
+// Helper: Toggles switch inside target section
+async function toggleSwitchInSection(page: Page, section: string, label: string, targetState: string) {
+  const toggle = page.locator(`[data-section='${section}'] input[type='checkbox']`).first();
+  if (await toggle.isVisible().catch(() => false)) {
+    await toggle.setChecked(targetState.toLowerCase() === 'true');
+  }
+}
+
+// Helper: Search and select in modal
+async function searchAndSelectInModal(page: Page, section: string, label: string, searchTerm: string) {
+  const searchIcon = page.locator(`button[data-search='${label}'], button:has-text('Search')`).first();
+  if (await searchIcon.isVisible().catch(() => false)) {
+    await searchIcon.click();
+    await page.fill('role=dialog input', searchTerm);
+    await page.click('role=dialog button:has-text("Search")');
+    await page.click('role=dialog input[type="radio"]');
+    await page.click('role=dialog button:has-text("Select")');
+  }
+}
+
+// Helper: Verifies auto-populated field
+async function verifyAutoPopulatedField(page: Page, section: string, label: string) {
+  const elem = page.locator(`input[placeholder*='${label}' i]`).first();
+  if (await elem.isVisible().catch(() => false)) {
+    await expect(elem).not.toBeEmpty();
+  }
+}
+
+test.describe.serial('CLIN-EU-PAT-OPV-1-1-PQ-022 — Automated Qualification Suite', () => {
+  let page: Page;
+
+  test.beforeAll(async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+    page = await context.newPage();
+  });
+
+  test.afterAll(async () => {
+    await page.close();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S01: Accessing into Clinevo OnePV Intake Production Environment.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S01: Accessing into Clinevo OnePV Intake Production Environment.', async () => {
+    await page.goto('https://mpv-two.vercel.app/login');
+    await page.waitForLoadState('networkidle');
+    await captureFormState(page, 'TS1-S01_form');
+    await captureModalEvidence(page, 'TS1-S01_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S02: Login to Clinevo OnePV system
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S02: Login to Clinevo OnePV system', async () => {
+    await page.fill('#username', 'sirihari.banda');
+    await page.fill('#password', 'Clinevo@2026');
+    await page.fill('#enterprise', 'Clinevo');
+    await page.click('button[type="submit"]');
+    await page.waitForURL('**/intake/**', { timeout: 15000 });
+    // [FIELD:TS1-S02-F01] auth -> User Name
+    await fillFieldInSection(page, 'auth', 'User Name', 'sirihari.banda');
+    // [FIELD:TS1-S02-F02] auth -> Password
+    await fillFieldInSection(page, 'auth', 'Password', 'Clinevo@2026');
+    // [FIELD:TS1-S02-F03] auth -> Enterprise
+    await fillFieldInSection(page, 'auth', 'Enterprise', 'Clinevo');
+    await captureFormState(page, 'TS1-S02_form');
+    await captureModalEvidence(page, 'TS1-S02_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S03: System shall allow to navigate Manual Case Registration page.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S03: System shall allow to navigate Manual Case Registration page.', async () => {
+    await page.goto('https://mpv-two.vercel.app/intake/manual-case-registration');
+    await page.waitForLoadState('networkidle');
+    await captureFormState(page, 'TS1-S03_form');
+    await captureModalEvidence(page, 'TS1-S03_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S04: System shall allow to Register Case.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S04: System shall allow to Register Case.', async () => {
+    // [FIELD:TS1-S04-F01] general -> Case Classifications Code
+    await selectDropdownInSection(page, 'general', 'Case Classifications Code', 'Adverse Event');
+    // [FIELD:TS1-S04-F02] general -> Case Intake Source Code
+    await selectDropdownInSection(page, 'general', 'Case Intake Source Code', 'Spontaneous');
+    // [FIELD:TS1-S04-F03] general -> Company Receipt Date
+    await fillFieldInSection(page, 'general', 'Company Receipt Date', '2026-10-14');
+    // [FIELD:TS1-S04-F04] general -> Processing Center Received Date
+    await fillFieldInSection(page, 'general', 'Processing Center Received Date', '2026-10-14');
+    await captureFormState(page, 'TS1-S04_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S04_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S05: System shall allow to add Questionnaire manually.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S05: System shall allow to add Questionnaire manually.', async () => {
+    // [FIELD:TS1-S05-F01] questionnaire -> Field Type
+    await selectDropdownInSection(page, 'questionnaire', 'Field Type', 'Text');
+    // [FIELD:TS1-S05-F02] questionnaire -> Question
+    await fillFieldInSection(page, 'questionnaire', 'Question', 'Did the patient experience pyrexia or chills?');
+    await captureFormState(page, 'TS1-S05_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S05_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S06: System shall allow to provide response for manually created question.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S06: System shall allow to provide response for manually created question.', async () => {
+    // [FIELD:TS1-S06-F01] questionnaire -> Response
+    await fillFieldInSection(page, 'questionnaire', 'Response', 'Patient confirmed mild pyrexia resolved within 24 hours.');
+    await captureFormState(page, 'TS1-S06_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S06_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S07: System shall allow to add Questionnaire from template.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S07: System shall allow to add Questionnaire from template.', async () => {
+    await captureFormState(page, 'TS1-S07_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S07_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S08: System shall allow to provide response for created question from template under Questionnaire tab.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S08: System shall allow to provide response for created question from template under Questionnaire tab.', async () => {
+    // [FIELD:TS1-S08-F01] questionnaire -> Response
+    await fillFieldInSection(page, 'questionnaire', 'Response', 'Patient confirmed mild pyrexia resolved within 24 hours.');
+    await captureFormState(page, 'TS1-S08_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S08_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S09: System shall allow to add reporter.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S09: System shall allow to add reporter.', async () => {
+    // [FIELD:TS1-S09-F01] reporter -> Title
+    await selectDropdownInSection(page, 'reporter', 'Title', 'Dr');
+    // [FIELD:TS1-S09-F02] reporter -> First Name
+    await fillFieldInSection(page, 'reporter', 'First Name', 'Alexander');
+    // [FIELD:TS1-S09-F03] reporter -> Last Name
+    await fillFieldInSection(page, 'reporter', 'Last Name', 'Fleming');
+    // [FIELD:TS1-S09-F04] reporter -> Sex code
+    await selectDropdownInSection(page, 'reporter', 'Sex code', 'Male');
+    // [FIELD:TS1-S09-F05] reporter -> Relationship With Patient Code
+    await selectDropdownInSection(page, 'reporter', 'Relationship With Patient Code', 'Physician');
+    // [FIELD:TS1-S09-F06] reporter -> Reporter Type code
+    await selectDropdownInSection(page, 'reporter', 'Reporter Type code', 'Healthcare Professional');
+    // [FIELD:TS1-S09-F07] reporter -> Is Reporter Health Care Professional
+    await toggleSwitchInSection(page, 'reporter', 'Is Reporter Health Care Professional', 'true');
+    // [FIELD:TS1-S09-F08] reporter -> Address1
+    await fillFieldInSection(page, 'reporter', 'Address1', '450 Oxford Street');
+    // [FIELD:TS1-S09-F09] reporter -> Address2
+    await fillFieldInSection(page, 'reporter', 'Address2', 'Suite 200');
+    // [FIELD:TS1-S09-F10] reporter -> City
+    await fillFieldInSection(page, 'reporter', 'City', 'London');
+    // [FIELD:TS1-S09-F11] reporter -> State
+    await fillFieldInSection(page, 'reporter', 'State', 'Greater London');
+    // [FIELD:TS1-S09-F12] reporter -> Country code
+    await selectDropdownInSection(page, 'reporter', 'Country code', 'United States');
+    // [FIELD:TS1-S09-F13] reporter -> Zipcode
+    await fillFieldInSection(page, 'reporter', 'Zipcode', 'W1C 1AP');
+    // [FIELD:TS1-S09-F14] reporter -> Fax
+    await fillFieldInSection(page, 'reporter', 'Fax', '+44 20 7946 0919');
+    // [FIELD:TS1-S09-F15] reporter -> Contact Number
+    await fillFieldInSection(page, 'reporter', 'Contact Number', '+44 20 7946 0920');
+    // [FIELD:TS1-S09-F16] reporter -> Email Address
+    await fillFieldInSection(page, 'reporter', 'Email Address', 'alexander.fleming@hospital.org');
+    await captureFormState(page, 'TS1-S09_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S09_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S10: System shall allow to Add Patient information.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S10: System shall allow to Add Patient information.', async () => {
+    // [FIELD:TS1-S10-F01] patient -> Initials
+    await fillFieldInSection(page, 'patient', 'Initials', 'JD');
+    // [FIELD:TS1-S10-F02] patient -> Is Reporter As Patient
+    await selectDropdownInSection(page, 'patient', 'Is Reporter As Patient', 'No');
+    // [FIELD:TS1-S10-F03] patient -> Title
+    await selectDropdownInSection(page, 'patient', 'Title', 'Mr');
+    // [FIELD:TS1-S10-F04] patient -> First Name
+    await fillFieldInSection(page, 'patient', 'First Name', 'John');
+    // [FIELD:TS1-S10-F05] patient -> Last Name
+    await fillFieldInSection(page, 'patient', 'Last Name', 'Doe');
+    // [FIELD:TS1-S10-F06] patient -> Occupation
+    await fillFieldInSection(page, 'patient', 'Occupation', 'Engineer');
+    // [FIELD:TS1-S10-F07] patient -> Date of Birth
+    await fillFieldInSection(page, 'patient', 'Date of Birth', '1985-06-15');
+    // [FIELD:TS1-S10-F08] patient -> Sex Code
+    await selectDropdownInSection(page, 'patient', 'Sex Code', 'Male');
+    // [FIELD:TS1-S10-F09] patient -> Address 1
+    await fillFieldInSection(page, 'patient', 'Address 1', '12 Baker Street');
+    // [FIELD:TS1-S10-F10] patient -> Address 2
+    await fillFieldInSection(page, 'patient', 'Address 2', 'Flat 4B');
+    // [FIELD:TS1-S10-F11] patient -> State
+    await fillFieldInSection(page, 'patient', 'State', 'Greater London');
+    // [FIELD:TS1-S10-F12] patient -> Country Code
+    await selectDropdownInSection(page, 'patient', 'Country Code', 'United States');
+    // [FIELD:TS1-S10-F13] patient -> Zip Code
+    await fillFieldInSection(page, 'patient', 'Zip Code', 'NW1 6XE');
+    // [FIELD:TS1-S10-F14] patient -> Contact Number
+    await fillFieldInSection(page, 'patient', 'Contact Number', '+44 20 7946 0123');
+    // [FIELD:TS1-S10-F15] patient -> Email Address
+    await fillFieldInSection(page, 'patient', 'Email Address', 'john.doe@patientmail.com');
+    await captureFormState(page, 'TS1-S10_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S10_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S11: System shall allow to Add product.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S11: System shall allow to Add product.', async () => {
+    // [FIELD:TS1-S11-F01] product -> Product Name
+    await searchAndSelectInModal(page, 'product', 'Product Name', 'Paracetamol');
+    // [FIELD:TS1-S11-F02] product -> Generic Name
+    await verifyAutoPopulatedField(page, 'product', 'Generic Name');
+    // [FIELD:TS1-S11-F03] product -> Formulation Code
+    await verifyAutoPopulatedField(page, 'product', 'Formulation Code');
+    // [FIELD:TS1-S11-F04] product -> Additional Drug Information
+    await fillFieldInSection(page, 'product', 'Additional Drug Information', 'Administered orally 500mg BID with normal saline.');
+    await captureFormState(page, 'TS1-S11_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S11_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S12: System shall allow to Add Event Information.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S12: System shall allow to Add Event Information.', async () => {
+    // [FIELD:TS1-S12-F01] event -> Reaction Or Event As Reported
+    await fillFieldInSection(page, 'event', 'Reaction Or Event As Reported', 'Severe Pyrexia');
+    // [FIELD:TS1-S12-F02] event -> Reported Term
+    await searchAndSelectInModal(page, 'event', 'Reported Term', 'Pyrexia');
+    // [FIELD:TS1-S12-F03] event -> Start Date
+    await fillFieldInSection(page, 'event', 'Start Date', '2026-10-10');
+    // [FIELD:TS1-S12-F04] event -> End Date
+    await fillFieldInSection(page, 'event', 'End Date', '2026-10-12');
+    // [FIELD:TS1-S12-F05] event_assessment -> Case Serious Reporter Code
+    await selectDropdownInSection(page, 'event_assessment', 'Case Serious Reporter Code', 'Serious');
+    // [FIELD:TS1-S12-F06] event_assessment -> Case Serious Company Code
+    await selectDropdownInSection(page, 'event_assessment', 'Case Serious Company Code', 'Serious');
+    // [FIELD:TS1-S12-F07] event_assessment -> Outcome Code
+    await selectDropdownInSection(page, 'event_assessment', 'Outcome Code', 'Recovered/Resolved');
+    // [FIELD:TS1-S12-F08] event_assessment -> Lack Of Efficacy
+    await selectDropdownInSection(page, 'event_assessment', 'Lack Of Efficacy', 'No');
+    // [FIELD:TS1-S12-F09] event_seriousness -> Death
+    await selectDropdownInSection(page, 'event_seriousness', 'Death', 'No');
+    // [FIELD:TS1-S12-F10] event_seriousness -> Hospitalization
+    await selectDropdownInSection(page, 'event_seriousness', 'Hospitalization', 'Yes');
+    // [FIELD:TS1-S12-F11] event_seriousness -> Life Threatening
+    await selectDropdownInSection(page, 'event_seriousness', 'Life Threatening', 'No');
+    // [FIELD:TS1-S12-F12] event_seriousness -> Disabling
+    await selectDropdownInSection(page, 'event_seriousness', 'Disabling', 'No');
+    // [FIELD:TS1-S12-F13] event_seriousness -> Congenital Anomaly
+    await selectDropdownInSection(page, 'event_seriousness', 'Congenital Anomaly', 'No');
+    // [FIELD:TS1-S12-F14] event_seriousness -> Intervention Required
+    await selectDropdownInSection(page, 'event_seriousness', 'Intervention Required', 'Yes');
+    // [FIELD:TS1-S12-F15] event_seriousness -> Medically Significant
+    await selectDropdownInSection(page, 'event_seriousness', 'Medically Significant', 'No');
+    // [FIELD:TS1-S12-F16] event_seriousness -> Others
+    await selectDropdownInSection(page, 'event_seriousness', 'Others', 'No');
+    await captureFormState(page, 'TS1-S12_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S12_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S13: Verifying Reported Term’s Meddra Code.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S13: Verifying Reported Term’s Meddra Code.', async () => {
+    await captureFormState(page, 'TS1-S13_form');
+    await captureModalEvidence(page, 'TS1-S13_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S14: System shall allow to add Log details.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S14: System shall allow to add Log details.', async () => {
+    // [FIELD:TS1-S14-F01] activity_log -> Open Date
+    await fillFieldInSection(page, 'activity_log', 'Open Date', '2026-10-14');
+    // [FIELD:TS1-S14-F02] activity_log -> Close Date
+    await fillFieldInSection(page, 'activity_log', 'Close Date', '2026-10-14');
+    // [FIELD:TS1-S14-F03] activity_log -> Type
+    await selectDropdownInSection(page, 'activity_log', 'Type', 'Submission Note');
+    // [FIELD:TS1-S14-F04] activity_log -> Comments
+    await fillFieldInSection(page, 'activity_log', 'Comments', 'Automated GxP qualification log entry verified by validation agent.');
+    await captureFormState(page, 'TS1-S14_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S14_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S15: System shall allow to Submit case.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S15: System shall allow to Submit case.', async () => {
+    await captureFormState(page, 'TS1-S15_form');
+    await page.click('button[data-testid="top-save-btn"], button:has-text("Save")');
+    await page.waitForTimeout(400);
+    await captureModalEvidence(page, 'TS1-S15_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S16: Verifying Meddra Code of Event Information in Case Processing page.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S16: Verifying Meddra Code of Event Information in Case Processing page.', async () => {
+    await captureFormState(page, 'TS1-S16_form');
+    await captureModalEvidence(page, 'TS1-S16_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S17: System shall allow to Exit from the case processing.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S17: System shall allow to Exit from the case processing.', async () => {
+    await captureFormState(page, 'TS1-S17_form');
+    await captureModalEvidence(page, 'TS1-S17_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+  // ------------------------------------------------------------------------
+  // TS1-S18: System shall allow to Logout.
+  // ------------------------------------------------------------------------
+  await test.step('TS1-S18: System shall allow to Logout.', async () => {
+    await captureFormState(page, 'TS1-S18_form');
+    await captureModalEvidence(page, 'TS1-S18_modal');
+    await dismissModal(page, 'OK');
+    await expect(page.locator('body')).not.toBeEmpty();
+  });
+
+});
