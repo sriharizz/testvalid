@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
   Upload,
+  Sparkles,
+  BarChart3,
   Zap,
   Download,
   Eye,
@@ -22,6 +24,9 @@ interface TopHeaderBarProps {
   onExecute: () => void;
   onOpenLiveBrowser: () => void;
   onDownloadDocx: () => void;
+  onDownloadEvidence?: () => void;
+  onOpenAuthoringModal?: () => void;
+  onOpenSummaryModal?: () => void;
   isExecuting: boolean;
   isAuthoring?: boolean;
 }
@@ -37,6 +42,9 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
   onExecute,
   onOpenLiveBrowser,
   onDownloadDocx,
+  onDownloadEvidence,
+  onOpenAuthoringModal,
+  onOpenSummaryModal,
   isExecuting,
   isAuthoring,
 }) => {
@@ -90,6 +98,18 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
 
       {/* Center: Upload & Simulation Controls */}
       <div className="flex items-center space-x-2.5">
+        {/* Author OQ/PQ Button */}
+        <button
+          type="button"
+          onClick={onOpenAuthoringModal}
+          disabled={isAuthoring || isExecuting}
+          className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-2.5 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border border-indigo-400/40 mr-2"
+          title="Prepare OQ (from FDS) or PQ (from URS) validation protocols automatically"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+          <span>Author OQ / PQ</span>
+        </button>
+
         {/* Compact Upload Button + Dropdown */}
         <div className="relative flex items-center">
           <input
@@ -182,20 +202,52 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
         </button>
 
 
-        {/* Download Executed Docx */}
+                {/* Executive Summary Button */}
+        <button
+          type="button"
+          onClick={onOpenSummaryModal}
+          disabled={!session}
+          className={`font-semibold px-2.5 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border ${
+            !session
+              ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+              : 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500/80 shadow-amber-500/20'
+          }`}
+          title="View AI-Powered Executive Validation Summary & Root-Cause Analysis"
+        >
+          <BarChart3 className="w-3.5 h-3.5 text-amber-200" />
+          <span>Executive Summary</span>
+        </button>
+
+        {/* Download Executed Protocol */}
         <button
           type="button"
           onClick={onDownloadDocx}
           disabled={!session}
-          className={`font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border ${
+          className={`font-semibold px-2.5 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border ${
             !session
               ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
               : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500/80'
           }`}
-          title="Download the executed .docx protocol with filled results and screenshots"
+          title="Download the primary executed .docx protocol (Lightweight, results only)"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          <span>Protocol (.docx)</span>
+        </button>
+
+        {/* Download Companion Evidence Dossier */}
+        <button
+          type="button"
+          onClick={onDownloadEvidence}
+          disabled={!session}
+          className={`font-semibold px-2.5 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border ${
+            !session
+              ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+              : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500/80'
+          }`}
+          title="Download the dedicated companion evidence document with watermarked screenshots"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>Download .docx</span>
+          <span>Evidence Dossier (.docx)</span>
         </button>
       </div>
     </header>

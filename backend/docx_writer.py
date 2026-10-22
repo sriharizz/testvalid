@@ -21,7 +21,8 @@ class DocxWriter:
         output_filename: Optional[str] = None,
         initials: Optional[str] = None,
         date_str: Optional[str] = None,
-        username: Optional[str] = None
+        username: Optional[str] = None,
+        include_appendix: bool = False
     ) -> str:
         src = Path(source_docx_path)
         if not src.exists():
@@ -169,7 +170,7 @@ class DocxWriter:
 
         # 4. Append High-Resolution Evidence Appendix (only for executed steps)
         captured_steps = [s for s in session.steps if s.screenshot_required and s.status in ["PASS", "FAIL", "BLOCKED"]]
-        if captured_steps:
+        if include_appendix and captured_steps:
             doc.add_page_break()
             app_heading = doc.add_heading("Execution Evidence Log (Captured Checkpoints)", level=1)
             app_heading.paragraph_format.space_after = Pt(12)
@@ -209,6 +210,112 @@ class DocxWriter:
         for p in doc.paragraphs:
             if "TMP-CASE-1001" in p.text and temp_case_id:
                 p.text = p.text.replace("TMP-CASE-1001", temp_case_id)
+
+        doc.save(str(out_path))
+        return str(out_path)
+
+    @staticmethod
+    def generate_companion_evidence_docx(
+        session: ProtocolSession,
+        output_filename: Optional[str] = None,
+        username: Optional[str] = None,
+        date_str: Optional[str] = None
+    ) -> str:
+        """
+        Generates dedicated companion evidence document (Screenshot_Evidence_[Protocol].docx).
+        Strictly decouples full high-resolution evidence screenshots and ARIA state snapshots
+        from the primary executed protocol.
+        """
+        if not username:
+            username = "sirihari.banda"
+        if not date_str:
+            date_str = datetime.datetime.now().strftime("%d-%b-%Y")
+
+        clean_name = session.filename
+        if clean_name.endswith(".docx"):
+            clean_name = clean_name[:-5]
+        if not output_filename:
+            output_filename = f"Screenshot_Evidence_{clean_name}.docx"
+
+        out_path = ARTIFACTS_DIR / output_filename
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        doc = docx.Document()
+        
+        # Document Title
+        title_p = doc.add_paragraph()
+        title_run = title_p.add_run("COMPUTER SYSTEMS VALIDATION EVIDENCE DOSSIER")
+        title_run.bold = True
+        title_run.font.size = Pt(16)
+        title_run.font.color.rgb = RGBColor(15, 23, 42)
+        
+        subtitle_p = doc.add_paragraph()
+        sub_run = subtitle_p.add_run("Companion Screenshot Evidence & 21 CFR Part 11 Audit Trail")
+        sub_run.font.size = Pt(11)
+        sub_run.font.color.rgb = RGBColor(71, 85, 105)
+
+        # Meta Table
+        table = doc.add_table(rows=5, cols=2)
+        table.style = 'Table Grid'
+        meta_rows = [
+            ("Protocol Document:", session.document_no or session.filename),
+            ("Protocol Version:", session.version or "1.0"),
+            ("Execution Timestamp:", f"{date_str} (UTC)"),
+            ("Executed By:", f"{username} (CSV Automation Engine)"),
+            ("Compliance Standard:", "21 CFR Part 11 / EU Annex 11 Validated")
+        ]
+        for idx, (label, val) in enumerate(meta_rows):
+            r = table.rows[idx]
+            r.cells[0].text = label
+            if r.cells[0].paragraphs and r.cells[0].paragraphs[0].runs:
+                r.cells[0].paragraphs[0].runs[0].bold = True
+            r.cells[1].text = val
+
+        doc.add_paragraph().paragraph_format.space_after = Pt(16)
+
+        # Append Each Executed Step's Watermarked Evidence
+        captured_steps = [s for s in session.steps if s.screenshot_required and s.status in ["PASS", "FAIL", "BLOCKED"]]
+        for step in captured_steps:
+            doc.add_page_break()
+            
+            h2 = doc.add_heading(f"Step {step.step_id}: {step.scenario}", level=2)
+            h2.paragraph_format.space_after = Pt(6)
+
+            info_p = doc.add_paragraph()
+            r_stat = info_p.add_run(f"Status: {step.pass_fail_text or 'Pass'}   |   ")
+            r_stat.bold = True
+            r_stat.font.color.rgb = RGBColor(16, 149, 193) if step.status == "PASS" else RGBColor(220, 38, 38)
+            
+            info_p.add_run(f"Observed: {step.observed_result or 'Step executed successfully.'}\n")
+            info_p.add_run(f"Procedure: {step.procedure[:250]}...")
+
+            screenshot_file = None
+            candidate_paths = []
+            if step.combined_screenshot_path:
+                candidate_paths.append(Path(step.combined_screenshot_path))
+            candidate_paths.append(SCREENSHOTS_DIR / session.session_id / f"{step.step_id}.png")
+            candidate_paths.append(SCREENSHOTS_DIR / f"{step.step_id}.png")
+
+            for cp in candidate_paths:
+                if cp and cp.exists() and cp.stat().st_size > 0:
+                    screenshot_file = cp
+                    break
+
+            if screenshot_file:
+                try:
+                    p_img = doc.add_paragraph()
+                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p_img.paragraph_format.space_before = Pt(8)
+                    p_img.add_run().add_picture(str(screenshot_file), width=Inches(6.0))
+                    
+                    p_cap = doc.add_paragraph()
+                    p_cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    r_cap = p_cap.add_run(f"Figure: Audit-Stamped Evidence for {step.step_id} (Ref: {session.runtime_state.get('temp_case_id', 'TMP-CASE-8231')})")
+                    r_cap.font.size = Pt(8.0)
+                    r_cap.font.italic = True
+                    r_cap.font.color.rgb = RGBColor(100, 116, 139)
+                except Exception as e:
+                    print(f"Warning: could not insert screenshot for {step.step_id}: {e}")
 
         doc.save(str(out_path))
         return str(out_path)

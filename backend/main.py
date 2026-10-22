@@ -17,7 +17,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from schemas import ProtocolSession, ProtocolStep, TraceStage, ReadinessFlag
+from schemas import ProtocolSession, ProtocolStep, TraceStage, ReadinessFlag, ProtocolGenerationRequest, ProtocolGenerationResponse, ExecutionSummaryReport, StepRootCauseAnalysis
+from protocol_generator import ProtocolGenerator
 from extractor import extract_protocol
 from check_coverage import CoverageChecker, check_plan_to_spec, check_protocol_to_plan
 from agents import PlannerAgent, PlaywrightGeneratorAgent, HealerAgent, compute_git_baseline
@@ -329,6 +330,182 @@ def download_executed_docx(session_id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"Executed_{session.filename}"
     )
+
+@app.get("/api/download-companion-evidence-docx/{session_id}")
+def download_companion_evidence_docx(session_id: str):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+    evidence_docx = DocxWriter.generate_companion_evidence_docx(
+        session=session,
+        output_filename=f"Screenshot_Evidence_{session.filename}"
+    )
+
+    clean_name = session.filename
+    if clean_name.endswith(".docx"):
+        clean_name = clean_name[:-5]
+
+    return FileResponse(
+        evidence_docx,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"Screenshot_Evidence_{clean_name}.docx"
+    )
+
+@app.post("/api/archive-session/{session_id}")
+def archive_session(session_id: str):
+    import hashlib
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+    archive_dir = ARTIFACTS_DIR / "archive" / session_id
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_files = {}
+
+    def hash_and_copy(file_path: Path, dest_name: str):
+        if file_path.exists() and file_path.is_file():
+            hasher = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                while chunk := f.read(65536):
+                    hasher.update(chunk)
+            file_hash = hasher.hexdigest()
+            dest_path = archive_dir / dest_name
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(file_path), str(dest_path))
+            manifest_files[dest_name] = {
+                "sha256": file_hash,
+                "size_bytes": dest_path.stat().st_size
+            }
+
+    exec_docx = ARTIFACTS_DIR / f"executed_{session.filename}"
+    if exec_docx.exists():
+        hash_and_copy(exec_docx, f"Executed_{session.filename}")
+
+    evid_docx = ARTIFACTS_DIR / f"Screenshot_Evidence_{session.filename}"
+    if evid_docx.exists():
+        hash_and_copy(evid_docx, f"Screenshot_Evidence_{session.filename}")
+
+    sc_dir = SCREENSHOTS_DIR / session_id
+    if sc_dir.exists():
+        for sc in sc_dir.glob("*.png"):
+            hash_and_copy(sc, f"screenshots/{sc.name}")
+
+    manifest_data = {
+        "session_id": session_id,
+        "protocol": session.document_no or session.filename,
+        "archived_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "total_files": len(manifest_files),
+        "files": manifest_files
+    }
+
+    manifest_json_path = archive_dir / "manifest.json"
+    with open(manifest_json_path, "w", encoding="utf-8") as f:
+        json.dump(manifest_data, f, indent=2)
+
+    manifest_sha_path = archive_dir / "manifest.sha256"
+    with open(manifest_sha_path, "w", encoding="utf-8") as f:
+        for fname, info in manifest_files.items():
+            f.write(f"{info['sha256']}  {fname}\n")
+
+    return {
+        "status": "archived",
+        "archive_directory": str(archive_dir),
+        "manifest": manifest_data
+    }
+
+
+
+@app.get("/api/session-summary/{session_id}", response_model=ExecutionSummaryReport)
+def get_session_summary(session_id: str):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+    total_steps = len(session.steps)
+    passed_count = sum(1 for s in session.steps if s.status == "PASS")
+    failed_count = sum(1 for s in session.steps if s.status == "FAIL")
+    blocked_count = sum(1 for s in session.steps if s.status == "BLOCKED")
+
+    overall_status = "PASS" if (failed_count == 0 and blocked_count == 0 and passed_count > 0) else ("FAIL" if failed_count > 0 else "BLOCKED")
+    acceptance_criteria_met = (overall_status == "PASS")
+
+    deviation_ids = []
+    root_cause_analyses = []
+
+    for s in session.steps:
+        if s.status in ["FAIL", "BLOCKED"]:
+            dev_id = f"DEV-{len(deviation_ids)+1:03d}"
+            deviation_ids.append(dev_id)
+            obs = s.observed_result or s.failure_reason or "Unknown execution discrepancy"
+            impact = "CRITICAL" if any(k in s.scenario.lower() for k in ["login", "save", "event", "patient"]) else "MAJOR"
+
+            if "mandatory" in obs.lower() or "validation error" in obs.lower():
+                rc_exp = "System enforced strict data validation. The step procedure attempted form submission before all mandatory GxP fields were completed."
+                capa = "Ensure prerequisite clinical fields are fully populated prior to triggering form submission."
+            elif "timeout" in obs.lower() or "waiting for" in obs.lower():
+                rc_exp = f"UI synchronization latency. Target element did not reach stable/actionable state within the 10-second DOM timeout window."
+                capa = "Review asynchronous component rendering speed; adjust network wait condition."
+            elif "blocked" in obs.lower():
+                rc_exp = "Dependent execution block. Step execution was inhibited by an upstream precondition halt."
+                capa = "Resolve upstream blocker and re-execute serial sequence."
+            else:
+                rc_exp = f"Functional discrepancy between expected protocol acceptance criteria and observed runtime DOM state ({obs[:150]})."
+                capa = "Perform code inspection on active UI component and align acceptance criteria with functional specification."
+
+            root_cause_analyses.append(StepRootCauseAnalysis(
+                step_id=s.step_id,
+                scenario=s.scenario,
+                failure_observation=obs,
+                root_cause_explanation=rc_exp,
+                impact_assessment=impact,
+                capa_remediation=capa
+            ))
+
+    manifest_file = ARTIFACTS_DIR / "archive" / session_id / "manifest.sha256"
+    manifest_sha = None
+    if manifest_file.exists():
+        try:
+            with open(manifest_file, "r", encoding="utf-8") as mf:
+                lines = mf.read().splitlines()
+                if lines:
+                    manifest_sha = lines[0].split()[0]
+        except Exception:
+            pass
+
+    return ExecutionSummaryReport(
+        session_id=session_id,
+        document_no=session.document_no or session.filename,
+        protocol_title=session.title or session.filename,
+        tester="sirihari.banda (S.B.)",
+        execution_date_utc=time.strftime("%d-%b-%Y %H:%M UTC", time.gmtime()),
+        total_steps=total_steps,
+        passed_count=passed_count,
+        failed_count=failed_count,
+        blocked_count=blocked_count,
+        overall_status=overall_status,
+        acceptance_criteria_met=acceptance_criteria_met,
+        deviation_ids=deviation_ids,
+        root_cause_analyses=root_cause_analyses,
+        archive_status="ARCHIVED" if manifest_file.exists() else "READY_FOR_ARCHIVE",
+        manifest_sha256=manifest_sha
+    )
+
+@app.post("/api/generate-protocol")
+def generate_protocol(req: ProtocolGenerationRequest):
+    if req.protocol_type == "OQ":
+        res = ProtocolGenerator.generate_oq_protocol(
+            system_name=req.system_name,
+            version=req.version
+        )
+    else:
+        res = ProtocolGenerator.generate_pq_protocol(
+            system_name=req.system_name,
+            version=req.version
+        )
+    return res
+
 
 @app.websocket("/ws/session/{session_id}")
 async def websocket_session(websocket: WebSocket, session_id: str):

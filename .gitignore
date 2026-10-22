@@ -27,3 +27,6 @@ backend/artifacts/temp/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Portable Node.js runtime (download separately)
+node-v*-win-x64/

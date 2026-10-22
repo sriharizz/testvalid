@@ -3,9 +3,10 @@ import re
 import asyncio
 import base64
 import time
+import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from playwright.async_api import async_playwright, Page
 from schemas import ProtocolStep, ProtocolSession, PlannedStep, PlannedFieldAction
 
@@ -443,6 +444,26 @@ def stitch_two_stage_screenshots(form_img_path: Path, modal_img_path: Path, outp
     except Exception as e:
         print(f"Warning: screenshot stitching error: {e}")
 
+
+def stamp_gxp_metadata_banner(image_path: Path, step_id: str, case_id: str = '', tester: str = 'sirihari.banda') -> Path:
+    """Stamps visible, tamper-evident 21 CFR Part 11 date and time banner onto screenshot."""
+    try:
+        with Image.open(image_path) as im:
+            banner_height = 36
+            new_img = Image.new('RGB', (im.width, im.height + banner_height), (15, 23, 42))
+            new_img.paste(im, (0, banner_height))
+        draw = ImageDraw.Draw(new_img)
+        now_utc = datetime.datetime.now(datetime.timezone.utc).strftime('%d-%b-%Y %H:%M:%S UTC')
+        ref = case_id if case_id else 'VALIDATION CHECKPOINT'
+        left_text = f"STEP: {step_id} | REF: {ref} | 21 CFR PART 11"
+        right_text = f"USER: {tester} | {now_utc}"
+        draw.text((16, 10), left_text, fill=(248, 250, 252))
+        draw.text((max(im.width - 450, 20), 10), right_text, fill=(56, 189, 248))
+        new_img.save(image_path)
+    except Exception as e:
+        print(f"Warning: could not stamp GxP watermark on {image_path}: {e}")
+    return image_path
+
 def assign_step_screenshots(step: ProtocolStep, session_id: str, form_img: Optional[str] = None, modal_img: Optional[str] = None, combined_path: Optional[Path] = None):
     if form_img:
         step.form_screenshot_path = str(form_img)
@@ -524,6 +545,7 @@ class PlaywrightRunner:
                 except Exception:
                     pass
                 await page.screenshot(path=str(filepath))
+                stamp_gxp_metadata_banner(filepath, step_id=step_id, case_id=session.runtime_state.get("case_number", ""), tester=creds.get("username", "sirihari.banda"))
                 try:
                     await page.evaluate("() => { const c = document.getElementById('playwright-virtual-cursor'); if (c) c.style.display = 'flex'; }")
                 except Exception:

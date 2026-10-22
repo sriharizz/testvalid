@@ -79,6 +79,7 @@ class ProtocolStep(BaseModel):
     primary_section: SectionType
     extracted_fields: List[ExtractedFieldSpec] = Field(default_factory=list)
     sub_actions: List[SubActionSpec] = Field(default_factory=list)
+    executable_commands: List[Dict[str, Any]] = Field(default_factory=list)
     screenshot_required: bool = False
     screenshot_count: int = 0
     capture_before_modal_dismiss: bool = False
@@ -121,6 +122,7 @@ class PlannedStep(BaseModel):
     primary_section: SectionType
     field_actions: List[PlannedFieldAction] = Field(default_factory=list)
     sub_actions: List[SubActionSpec] = Field(default_factory=list)
+    executable_commands: List[Dict[str, Any]] = Field(default_factory=list)
     expected_assertions: List[str] = Field(default_factory=list)
     requires_form_screenshot: bool = False
     requires_modal_screenshot: bool = False
@@ -174,3 +176,49 @@ class ProtocolSession(BaseModel):
     git_commit_sha: str = "v1.1-a8f3d"
     readiness_flags: List[ReadinessFlag] = Field(default_factory=list)
     trace_stages: List[TraceStage] = Field(default_factory=list)
+
+
+class StepRootCauseAnalysis(BaseModel):
+    step_id: str
+    scenario: str
+    failure_observation: str
+    root_cause_explanation: str
+    impact_assessment: Literal["CRITICAL", "MAJOR", "MINOR"]
+    capa_remediation: str
+
+class ExecutionSummaryReport(BaseModel):
+    session_id: str
+    document_no: str
+    protocol_title: str
+    tester: str
+    execution_date_utc: str
+    total_steps: int
+    passed_count: int
+    failed_count: int
+    blocked_count: int
+    overall_status: Literal["PASS", "FAIL", "BLOCKED"]
+    acceptance_criteria_met: bool
+    deviation_ids: List[str] = Field(default_factory=list)
+    root_cause_analyses: List[StepRootCauseAnalysis] = Field(default_factory=list)
+    compliance_statement: str = "Executed in accordance with 21 CFR Part 11 and EU Annex 11 computerized system validation principles."
+    archive_status: Optional[str] = "READY_FOR_ARCHIVE"
+    manifest_sha256: Optional[str] = None
+
+class ProtocolGenerationRequest(BaseModel):
+    protocol_type: Literal["OQ", "PQ"]
+    source_type: Literal["FDS", "URS"]
+    system_name: str = "OnePV / Safety Platform"
+    version: str = "1.0"
+    document_no: Optional[str] = None
+    requirements_text: Optional[str] = None
+    target_url: Optional[str] = "https://mpv-two.vercel.app"
+
+class ProtocolGenerationResponse(BaseModel):
+    protocol_type: str
+    document_no: str
+    filename: str
+    file_path: str
+    total_steps_generated: int
+    requirements_traced: int
+    rtm_table_included: bool
+    preview_steps: List[Dict[str, Any]]
