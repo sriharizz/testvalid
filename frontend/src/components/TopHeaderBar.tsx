@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
   Upload,
+  Sparkles,
+  BarChart3,
   Zap,
   Download,
   Eye,
@@ -17,11 +19,14 @@ interface TopHeaderBarProps {
   onSimModeChange: (mode: SimulationMode) => void;
   visibleBrowser: boolean;
   onVisibleBrowserChange: (val: boolean) => void;
-  onUploadFile: (file: File) => void;
-  onLoadSample: (filename: string) => void;
+  onUploadFile: (file: File, productId?: string) => void;
+  onLoadSample: (filename: string, productId?: string) => void;
   onExecute: () => void;
   onOpenLiveBrowser: () => void;
   onDownloadDocx: () => void;
+  onDownloadEvidence?: () => void;
+  onOpenAuthoringModal?: () => void;
+  onOpenSummaryModal?: () => void;
   isExecuting: boolean;
   isAuthoring?: boolean;
 }
@@ -37,12 +42,26 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
   onExecute,
   onOpenLiveBrowser,
   onDownloadDocx,
+  onDownloadEvidence,
+  onOpenAuthoringModal,
+  onOpenSummaryModal,
   isExecuting,
   isAuthoring,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [samples, setSamples] = useState<{ filename: string; size_kb: number }[]>([]);
+  const [products, setProducts] = useState<{ product_id: string; name: string }[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<string>("onepv");
+
+  useEffect(() => {
+    fetch('/api/products')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.products) setProducts(data.products);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch('/api/list-sample-protocols')
@@ -55,7 +74,7 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      onUploadFile(e.target.files[0]);
+      onUploadFile(e.target.files[0], selectedProduct);
     }
   };
 
@@ -81,15 +100,46 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
             <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04Z" />
           </svg>
         </div>
-        <span className="font-bold text-base md:text-lg tracking-tight text-white flex items-center gap-1.5">
-          <span>Clinevo OnePV</span>
-          <span className="text-slate-400 font-normal">—</span>
-          <span className="font-medium text-slate-200">Validation & Execution Portal</span>
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-base md:text-lg tracking-tight text-white flex items-center gap-1.5">
+            <span>Clinevo</span>
+            <span className="text-slate-400 font-normal">—</span>
+          </span>
+          <select
+            value={selectedProduct}
+            onChange={(e) => setSelectedProduct(e.target.value)}
+            disabled={isAuthoring || isExecuting}
+            className="bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 text-white font-semibold text-xs rounded-lg px-2.5 py-1 focus:outline-hidden focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors shadow-xs"
+            title="Select target product for validation"
+          >
+            {products.length > 0 ? (
+              products.map((p) => (
+                <option key={p.product_id} value={p.product_id} className="bg-slate-900 text-white">
+                  {p.name}
+                </option>
+              ))
+            ) : (
+              <option value="onepv">OnePV</option>
+            )}
+          </select>
+          <span className="font-medium text-xs text-slate-300 hidden xl:inline">Portal</span>
+        </div>
       </div>
 
       {/* Center: Upload & Simulation Controls */}
       <div className="flex items-center space-x-2.5">
+        {/* Author OQ/PQ Button */}
+        <button
+          type="button"
+          onClick={onOpenAuthoringModal}
+          disabled={isAuthoring || isExecuting}
+          className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-2.5 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border border-indigo-400/40 mr-2"
+          title="Prepare OQ (from FDS) or PQ (from URS) validation protocols automatically"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+          <span>Author OQ / PQ</span>
+        </button>
+
         {/* Compact Upload Button + Dropdown */}
         <div className="relative flex items-center">
           <input
@@ -134,7 +184,7 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
                     key={s.filename}
                     type="button"
                     onClick={() => {
-                      onLoadSample(s.filename);
+                      onLoadSample(s.filename, selectedProduct);
                       setDropdownOpen(false);
                     }}
                     className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-800 text-slate-200 transition-colors flex flex-col"
@@ -182,20 +232,52 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
         </button>
 
 
-        {/* Download Executed Docx */}
+                {/* Executive Summary Button */}
+        <button
+          type="button"
+          onClick={onOpenSummaryModal}
+          disabled={!session}
+          className={`font-semibold px-2.5 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border ${
+            !session
+              ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+              : 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500/80 shadow-amber-500/20'
+          }`}
+          title="View AI-Powered Executive Validation Summary & Root-Cause Analysis"
+        >
+          <BarChart3 className="w-3.5 h-3.5 text-amber-200" />
+          <span>Executive Summary</span>
+        </button>
+
+        {/* Download Executed Protocol */}
         <button
           type="button"
           onClick={onDownloadDocx}
           disabled={!session}
-          className={`font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border ${
+          className={`font-semibold px-2.5 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border ${
             !session
               ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
               : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500/80'
           }`}
-          title="Download the executed .docx protocol with filled results and screenshots"
+          title="Download the primary executed .docx protocol (Lightweight, results only)"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          <span>Protocol (.docx)</span>
+        </button>
+
+        {/* Download Companion Evidence Dossier */}
+        <button
+          type="button"
+          onClick={onDownloadEvidence}
+          disabled={!session}
+          className={`font-semibold px-2.5 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition-colors border ${
+            !session
+              ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+              : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500/80'
+          }`}
+          title="Download the dedicated companion evidence document with watermarked screenshots"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>Download .docx</span>
+          <span>Evidence Dossier (.docx)</span>
         </button>
       </div>
     </header>

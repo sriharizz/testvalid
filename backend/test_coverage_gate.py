@@ -64,7 +64,7 @@ def test_2_negative_missing_step_id(setup_pipeline):
     assert "TS1-S04" in gate1_res["missing_step_ids"]
     
     # Gate 2 with TS1-S04 dropped from spec_code
-    corrupted_spec = spec_code.replace("await test.step('TS1-S04'", "// dropped TS1-S04")
+    corrupted_spec = spec_code.replace("await test.step('TS1-S04", "// dropped TS1-S04")
     gate2_res = CoverageChecker.verify_plan_to_playwright_code(plan_steps, corrupted_spec)
     assert gate2_res["passed"] is False
     assert "TS1-S04" in gate2_res["missing_step_blocks"]
@@ -90,8 +90,8 @@ def test_4_negative_silent_skip(setup_pipeline):
     session, plan_steps, spec_code, _ = setup_pipeline
     
     corrupted_spec = spec_code.replace(
-        "await test.step('TS1-S04'",
-        "test.skip('Skipping TS1-S04');\n  await test.step('TS1-S04'"
+        "await test.step('TS1-S04",
+        "test.skip('Skipping TS1-S04');\n  await test.step('TS1-S04"
     )
     gate2_res = CoverageChecker.verify_plan_to_playwright_code(plan_steps, corrupted_spec)
     assert gate2_res["passed"] is False

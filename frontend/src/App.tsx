@@ -1,3 +1,5 @@
+import { ExecutionSummaryModal, SummaryReportData } from './components/ExecutionSummaryModal';
+import { ProtocolAuthoringModal } from './components/ProtocolAuthoringModal';
 import React, { useState, useRef } from 'react';
 import { ProtocolSession, ProtocolStep, SimulationMode, TraceStage } from './types';
 import { TopHeaderBar } from './components/TopHeaderBar';
@@ -44,6 +46,13 @@ export const App: React.FC = () => {
   const [isWsConnected, setIsWsConnected] = useState<boolean>(false);
 
   // Artifact Modal
+    // Executive Summary & AI RCA State
+  const [summaryData, setSummaryData] = useState<SummaryReportData | null>(null);
+  const [isSummaryOpen, setIsSummaryOpen] = useState<boolean>(false);
+
+  // OQ / PQ Authoring Modal State
+  const [isAuthoringModalOpen, setIsAuthoringModalOpen] = useState<boolean>(false);
+
   const [selectedStage, setSelectedStage] = useState<TraceStage | null>(null);
 
   // GxP Human Review Safety Gate
@@ -58,7 +67,7 @@ export const App: React.FC = () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // Manual Protocol Upload Handler (processes the user's uploaded Word file dynamically)
-  const handleUploadFile = async (file: File) => {
+  const handleUploadFile = async (file: File, productId: string = 'onepv') => {
     setIsAuthoring(true);
     setAuthoringStage(1); // Stage 1: Extraction running
     setSession(null);
@@ -72,6 +81,7 @@ export const App: React.FC = () => {
       // 2. Upload file to backend for dynamic extraction and Groq Qwen planner
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('product_id', productId);
 
       // Stage 2 indicator: Groq planning
       const timer = setTimeout(() => {
@@ -115,7 +125,7 @@ export const App: React.FC = () => {
   };
 
   // Sample Protocol Selection (Dropdown option)
-  const handleLoadSample = async (filename: string) => {
+  const handleLoadSample = async (filename: string, productId: string = 'onepv') => {
     setIsAuthoring(true);
     setAuthoringStage(1);
     setSession(null);
@@ -124,6 +134,7 @@ export const App: React.FC = () => {
     try {
       const formData = new FormData();
       formData.append('filename', filename);
+      formData.append('product_id', productId);
 
       const timer = setTimeout(() => {
         setAuthoringStage(2);
@@ -213,13 +224,21 @@ export const App: React.FC = () => {
             flagType: msg.flag_type || 'AMBIGUITY',
             reason: msg.reason || 'GxP Ambiguity detected. Human review required before taking any action or evidence.',
           });
-        } else if (msg.type === 'EXECUTION_COMPLETE') {
+                } else if (msg.type === 'EXECUTION_COMPLETE') {
           setIsExecuting(false);
           setWaitingForApproval(false);
           setHumanReviewAlert(null);
           if (msg.session) {
             setSession(msg.session);
           }
+          // Fetch and display AI Executive Summary automatically
+          fetch(`/api/session-summary/${session?.session_id || (msg.session && msg.session.session_id)}`)
+            .then((r) => r.json())
+            .then((data) => {
+              setSummaryData(data);
+              setIsSummaryOpen(true);
+            })
+            .catch((e) => console.error('Summary fetch error:', e));
         }
       } catch (e) {
         console.error('Error parsing WebSocket message:', e);
@@ -291,9 +310,35 @@ export const App: React.FC = () => {
       .catch((err) => console.error('Halt execution error:', err));
   };
 
+      const handleArchiveSession = async () => {
+    if (!session) return null;
+    const res = await fetch(`/api/archive-session/${session.session_id}`, { method: 'POST' });
+    const data = await res.json();
+    if (summaryData) {
+      setSummaryData({ ...summaryData, archive_status: 'ARCHIVED' });
+    }
+    return data;
+  };
+
+  const handleOpenSummary = () => {
+    if (!session) return;
+    fetch(`/api/session-summary/${session.session_id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setSummaryData(data);
+        setIsSummaryOpen(true);
+      })
+      .catch((e) => console.error('Summary fetch error:', e));
+  };
+
   const handleDownloadDocx = () => {
     if (!session) return;
     window.location.href = `/api/download-executed-docx/${session.session_id}`;
+  };
+
+  const handleDownloadEvidence = () => {
+    if (!session) return;
+    window.location.href = `/api/download-companion-evidence-docx/${session.session_id}`;
   };
 
   const shortCode = session?.document_no
@@ -314,6 +359,9 @@ export const App: React.FC = () => {
         onExecute={handleExecute}
         onOpenLiveBrowser={() => setIsLiveBrowserOpen(true)}
         onDownloadDocx={handleDownloadDocx}
+        onDownloadEvidence={handleDownloadEvidence}
+        onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
+        onOpenSummaryModal={handleOpenSummary}
         isExecuting={isExecuting}
         isAuthoring={isAuthoring}
       />
@@ -436,6 +484,23 @@ export const App: React.FC = () => {
       <ScreenshotLightboxModal
         data={lightboxData}
         onClose={() => setLightboxData(null)}
+      />
+
+      {/* AI-Assisted OQ/PQ Protocol Authoring Modal */}
+      <ProtocolAuthoringModal
+        isOpen={isAuthoringModalOpen}
+        onClose={() => setIsAuthoringModalOpen(false)}
+        onLoadGeneratedProtocol={(filename) => handleLoadSample(filename)}
+      />
+
+      {/* AI Executive Summary & Root-Cause Analysis Modal */}
+      <ExecutionSummaryModal
+        isOpen={isSummaryOpen}
+        onClose={() => setIsSummaryOpen(false)}
+        summary={summaryData}
+        onDownloadDocx={handleDownloadDocx}
+        onDownloadEvidence={handleDownloadEvidence}
+        onArchive={handleArchiveSession}
       />
     </div>
   );
