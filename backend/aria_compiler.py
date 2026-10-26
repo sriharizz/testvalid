@@ -82,7 +82,12 @@ class PlanCacheManager:
                 field_values[fa.label] = fa.target_value
 
         for ef in step.extracted_fields:
-            val = ef.explicit_value or field_values.get(ef.field_id) or field_values.get(ef.label) or "Default Data"
+            val = ef.explicit_value or field_values.get(ef.field_id) or field_values.get(ef.label)
+            if not val or str(val).startswith("(") or str(val).lower() == "default data":
+                if ef.control_type == "date" or "date" in ef.label.lower() or "birth" in ef.label.lower():
+                    val = datetime.date.today().isoformat()
+                else:
+                    val = ef.explicit_value or field_values.get(ef.field_id) or field_values.get(ef.label) or "Default Data"
             
             # Map control type to expected ARIA role
             aria_role = "textbox"
@@ -92,6 +97,8 @@ class PlanCacheManager:
                 aria_role = "checkbox"
             elif ef.control_type == "button_click":
                 aria_role = "button"
+            elif ef.control_type == "date":
+                aria_role = "textbox"
 
             c_loc = CompiledControlLocator(
                 field_id=ef.field_id,

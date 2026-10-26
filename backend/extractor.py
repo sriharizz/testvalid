@@ -358,10 +358,10 @@ def extract_fields_from_procedure(step_id: str, primary_section: SectionType, pr
                 auto_pop = True
             elif "toggle" in inst_l or "switch" in inst_l:
                 ctrl_type = "toggle"
-            elif "dropdown" in inst_l or "select from" in inst_l or "choose" in inst_l or "select" in inst_l or "assessment" in current_section or "seriousness" in current_section:
-                ctrl_type = "select"
             elif "date" in lbl_l or "birth" in lbl_l or "calendar" in inst_l or "timestamp" in inst_l:
                 ctrl_type = "date"
+            elif "dropdown" in inst_l or "select from" in inst_l or "choose" in inst_l or "select" in inst_l or "assessment" in current_section or "seriousness" in current_section:
+                ctrl_type = "select"
             else:
                 ctrl_type = "text"
                 
@@ -429,17 +429,47 @@ def infer_step_assertions(procedure: str, expected_result: str, fields: List[Ext
     assertions: List[StepAssertion] = []
     exp_lower = expected_result.lower()
 
-    if any(k in exp_lower for k in ["login page shall display", "homepage", "shall display", "page shall display", "view"]):
-        assertions.append(StepAssertion(
-            assertion_type="VIEW_ACTIVE",
-            description=expected_result[:100],
-            target_text=expected_result[:60]
-        ))
-    if any(k in exp_lower for k in ["confirmation message", "successfully", "saved", "message shall display", "alert"]):
+    if any(k in exp_lower for k in ["confirmation message", "successfully", "saved", "message shall display", "alert", "notification"]):
         assertions.append(StepAssertion(
             assertion_type="MESSAGE_DISPLAYED",
             description="Positive confirmation toast/modal",
             target_text="success"
+        ))
+    if "login page shall display" in exp_lower:
+        assertions.append(StepAssertion(
+            assertion_type="VIEW_ACTIVE",
+            description="Login page interface active",
+            target_text="login"
+        ))
+    elif any(k in exp_lower for k in ["user shall login into", "homepage", "intake system"]):
+        assertions.append(StepAssertion(
+            assertion_type="VIEW_ACTIVE",
+            description="Active authenticated session verified",
+            target_text="intake"
+        ))
+    elif "manual case registration" in exp_lower and "shall display" in exp_lower:
+        assertions.append(StepAssertion(
+            assertion_type="VIEW_ACTIVE",
+            description="Manual Case Registration view active",
+            target_text="manual case"
+        ))
+    elif "case processing" in exp_lower and "shall display" in exp_lower:
+        assertions.append(StepAssertion(
+            assertion_type="VIEW_ACTIVE",
+            description="Case Processing view active",
+            target_text="case processing"
+        ))
+    elif "audit" in exp_lower and "shall display" in exp_lower:
+        assertions.append(StepAssertion(
+            assertion_type="VIEW_ACTIVE",
+            description="Audit History view active",
+            target_text="audit"
+        ))
+    elif any(k in exp_lower for k in ["page shall display", "screen shall display", "interface shall display"]) and not any(k in exp_lower for k in ["message", "dialog", "modal", "alert"]):
+        assertions.append(StepAssertion(
+            assertion_type="VIEW_ACTIVE",
+            description=expected_result[:100].strip(),
+            target_text=expected_result[:60].strip()
         ))
     if any(k in exp_lower for k in ["error", "mandatory", "invalid", "required"]):
         assertions.append(StepAssertion(
