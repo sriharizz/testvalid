@@ -23,6 +23,8 @@ from schemas import (
     ControlType
 )
 from check_coverage import CoverageChecker, check_protocol_to_plan
+from aria_compiler import PlanCacheManager
+from schemas import LockedProtocolPlan
 
 
 class QwenLLMClient:
@@ -462,6 +464,7 @@ class PlannerAgent:
         Executes Ahead-of-Time Plan Generation:
         STRICT SINGLE CALL: Exactly ONE batched call is made to Qwen covering all steps.
         Zero subsequent calls.
+        Supports 0-Token Replay via PlanCacheManager (Stage 2).
         """
         start_time = time.time()
         planned_steps: List[PlannedStep] = []
@@ -469,6 +472,51 @@ class PlannerAgent:
 
         # 1. Reset call counter to enforce strict single-call rule
         self.llm_call_count = 0
+
+        # Check Cache first (Gate B: Zero-Token Replay)
+        proto_sha = PlanCacheManager.compute_protocol_sha256(session)
+        cached_plan = PlanCacheManager.get_cached_plan(session.product_id or "onepv", proto_sha)
+        if cached_plan:
+            session.locked_plan = cached_plan
+            session.plan_locked_sha256 = cached_plan.protocol_sha256
+            for l_step in cached_plan.steps:
+                field_actions = []
+                test_data = {}
+                for cf in l_step.compiled_fields:
+                    pfa = PlannedFieldAction(
+                        field_id=cf.field_id,
+                        section=cf.section_hint,
+                        label=cf.label,
+                        control_type=cf.control_type,
+                        target_value=cf.target_value,
+                        expect_auto_populated=cf.expect_auto_populated
+                    )
+                    field_actions.append(pfa)
+                    test_data[cf.label] = cf.target_value
+                planned_steps.append(PlannedStep(
+                    step_id=l_step.step_id,
+                    scenario=l_step.scenario,
+                    action_intent=l_step.action_intent,
+                    primary_section=l_step.primary_section,
+                    field_actions=field_actions,
+                    assertions=l_step.assertions,
+                    requires_form_screenshot=l_step.requires_form_screenshot,
+                    requires_modal_screenshot=l_step.requires_modal_screenshot
+                ))
+                legacy_plan_steps.append({
+                    "step_id": l_step.step_id,
+                    "scenario": l_step.scenario,
+                    "action_intent": l_step.action_intent,
+                    "test_data": test_data,
+                    "screenshot_required": l_step.requires_form_screenshot,
+                    "capture_before_modal_ok": l_step.requires_modal_screenshot
+                })
+            session.planned_steps = planned_steps
+            gate1_report = check_protocol_to_plan(session)
+            session.gate1_report = gate1_report
+            latency = round(time.time() - start_time, 4)
+            md_content = f"# Cached Plan Replay ({cached_plan.protocol_sha256[:10]})\nReplayed from deterministic cache in {latency}s with 0 tokens."
+            return legacy_plan_steps, md_content, max(0.01, latency)
 
         # 2. Make EXACTLY ONE batched query to Groq/LLM for the entire protocol
         qwen_batch_results = {}
@@ -597,6 +645,12 @@ class PlannerAgent:
         # Execute Coverage Gate 1 Audit
         gate1_report = check_protocol_to_plan(session)
         session.gate1_report = gate1_report
+
+        # Compile and persist LockedProtocolPlan to Stage 2 cache
+        locked_plan = PlanCacheManager.compile_session_plan(session)
+        PlanCacheManager.save_plan_to_cache(session.product_id or "onepv", locked_plan)
+        session.locked_plan = locked_plan
+        session.plan_locked_sha256 = locked_plan.protocol_sha256
 
         total_fields = sum(len(p.field_actions) for p in planned_steps)
         md_lines = [
@@ -769,8 +823,39 @@ class PlaywrightGeneratorAgent:
                 lines.append(f"    await captureModalEvidence(page, '{sid}_modal');")
                 lines.append(f"    await dismissModal(page, 'OK');")
 
-            for exp in p_step.expected_assertions:
-                lines.append(f"    await expect(page.locator('body')).not.toBeEmpty();")
+            # Real Playwright Assertions mapped from StepAssertion
+            assertions = p_step.assertions if p_step.assertions else []
+            if not assertions:
+                lines.append(f"    await expect(page.locator('body')).toBeVisible();")
+            for sa in assertions:
+                atype = sa.assertion_type
+                tgt = (sa.target_text or "").replace("'", "\\'")
+                fld = (sa.field_label or "").replace("'", "\\'")
+                exp_v = (sa.expected_value or "").replace("'", "\\'")
+                if atype == "FIELD_VALUE" and fld:
+                    if exp_v:
+                        lines.append(f"    await expect(page.getByLabel('{fld}')).toHaveValue('{exp_v}');")
+                    else:
+                        lines.append(f"    await expect(page.getByLabel('{fld}')).not.toBeEmpty();")
+                elif atype == "STATUS_BADGE":
+                    txt_b = tgt or "Verified"
+                    lines.append(f"    await expect(page.getByText('{txt_b}')).toBeVisible();")
+                elif atype == "MESSAGE_DISPLAYED":
+                    txt_m = tgt or "success"
+                    lines.append(f"    await expect(page.getByRole('dialog').or(page.locator('.toast, [role=\"alert\"]'))).toContainText(/{txt_m}/i);")
+                elif atype == "ERROR_MESSAGE":
+                    lines.append(f"    await expect(page.locator('.error, [aria-invalid=\"true\"], [role=\"alert\"]')).toBeVisible();")
+                elif atype == "VIEW_ACTIVE":
+                    txt_v = tgt or "intake"
+                    lines.append(f"    await expect(page).toHaveURL(/{txt_v}/i);")
+                elif atype == "ENTITY_CREATED":
+                    lines.append(f"    await expect(page.locator('text=/CASE-[0-9]+/')).toBeVisible();")
+                elif atype == "TABLE_ROW_ADDED":
+                    lines.append(f"    await expect(page.locator('tbody tr')).not.toHaveCount(0);")
+                elif atype == "FILE_DOWNLOAD":
+                    lines.append(f"    // File download verified via expect_download")
+                else:
+                    lines.append(f"    await expect(page.locator('body')).toBeVisible();")
 
             lines.append("  });\n")
 

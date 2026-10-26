@@ -58,13 +58,16 @@ class DocxWriter:
         # 2. Open with python-docx
         doc = docx.Document(str(out_path))
 
+        # Check for QA Reviewer signature (21 CFR Part 11)
+        qa_sig = next((s for s in (session.signatures or []) if s.signer_role == "QA_REVIEWER"), None)
+
         # Build map of steps by (table_index, row_index)
         step_map = {(s.table_index, s.row_index): s for s in session.steps}
         all_passed = all(s.status == "PASS" for s in session.steps)
 
         # 3. Populate execution tables
         for t_idx, table in enumerate(doc.tables):
-            # Check for Table 6 (Sign-off Acceptance & Deviation table)
+            # Check for Sign-off Acceptance & Deviation table
             if len(table.rows) >= 3 and len(table.columns) >= 4:
                 first_cell = table.rows[0].cells[0].text.strip().lower()
                 if "acceptance criteria" in first_cell:
@@ -88,11 +91,22 @@ class DocxWriter:
                         if len(table.rows[2].cells) > 3:
                             table.rows[2].cells[-1].text = f"{date_str}"
 
-                    # Row 3: Reviewed By & Date
+                    # Row 3: Reviewed By & Date (21 CFR Part 11: Leave blank until QA Review signature applied)
                     if len(table.rows) > 3 and len(table.rows[3].cells) > 1:
-                        table.rows[3].cells[1].text = "QA / CSV Lead"
-                        if len(table.rows[3].cells) > 3:
-                            table.rows[3].cells[-1].text = f"{date_str}"
+                        if qa_sig:
+                            table.rows[3].cells[1].text = f"{qa_sig.signer_full_name} ({qa_sig.signer_initials})"
+                            if len(table.rows[3].cells) > 3:
+                                try:
+                                    dt = datetime.datetime.fromisoformat(qa_sig.signed_at_utc.replace("Z", "+00:00"))
+                                    sig_date = dt.strftime("%d-%b-%Y")
+                                except Exception:
+                                    sig_date = qa_sig.signed_at_utc[:10]
+                                table.rows[3].cells[-1].text = sig_date
+                        else:
+                            # Must remain blank during test run per 21 CFR Part 11
+                            table.rows[3].cells[1].text = ""
+                            if len(table.rows[3].cells) > 3:
+                                table.rows[3].cells[-1].text = ""
                     continue
 
             for r_idx, row in enumerate(table.rows):
@@ -119,53 +133,77 @@ class DocxWriter:
                 if step.status == "QUEUED":
                     continue
 
-                # Column 0: Step #
-                display_num = step.step_number_display or step.step_id.split("-S")[-1]
-                row.cells[0].text = display_num
-                if row.cells[0].paragraphs and row.cells[0].paragraphs[0].runs:
-                    row.cells[0].paragraphs[0].runs[0].font.size = Pt(8.5)
-                    row.cells[0].paragraphs[0].runs[0].font.name = "Arial"
-                    row.cells[0].paragraphs[0].runs[0].bold = True
+                # Use discovered TableColumnMap coordinates when available
+                col_map = getattr(step, "col_map", None)
+                if col_map:
+                    col_step = col_map.step_col
+                    col_pass_fail = col_map.pass_fail_col
+                    col_observed = col_map.observed_col
+                    col_initials = col_map.initials_col
+                else:
+                    col_step = 0
+                    col_pass_fail = 4 if len(row.cells) > 4 else len(row.cells) - 2
+                    col_observed = None
+                    col_initials = 5 if len(row.cells) > 5 else len(row.cells) - 1
 
-                # Detect pass/fail and initials columns
-                col_pass_fail = 4 if len(row.cells) > 4 else len(row.cells) - 2
-                col_initials = 5 if len(row.cells) > 5 else len(row.cells) - 1
+                # Step # Column
+                if col_step < len(row.cells):
+                    display_num = step.step_number_display or step.step_id.split("-S")[-1]
+                    row.cells[col_step].text = display_num
+                    if row.cells[col_step].paragraphs and row.cells[col_step].paragraphs[0].runs:
+                        row.cells[col_step].paragraphs[0].runs[0].font.size = Pt(8.5)
+                        row.cells[col_step].paragraphs[0].runs[0].font.name = "Arial"
+                        row.cells[col_step].paragraphs[0].runs[0].bold = True
 
-                # Column 4: Pass / Fail & Observed Result
-                cell_pf = row.cells[col_pass_fail]
-                cell_pf.text = ""
-                p_pf = cell_pf.paragraphs[0]
                 status_text = step.pass_fail_text or ("Pass" if step.status == "PASS" else ("Fail" if step.status == "FAIL" else "Blocked"))
-                run_status = p_pf.add_run(status_text)
-                run_status.bold = True
-                run_status.font.size = Pt(9)
-                run_status.font.name = "Arial"
-                # Natural typed black ink per user GxP requirement (not colored)
-                run_status.font.color.rgb = RGBColor(15, 23, 42)
 
-                if step.observed_result:
-                    p_obs = cell_pf.add_paragraph()
-                    p_obs.paragraph_format.space_before = Pt(2)
-                    clean_obs = step.observed_result
-                    # Dynamic Case ID replacement in observed result
-                    if "TMP-CASE-" in clean_obs and temp_case_id:
-                        clean_obs = re.sub(r'TMP-CASE-[A-Z0-9\-]+', temp_case_id, clean_obs)
-                    if "CASE-2026-" in clean_obs and case_number:
-                        clean_obs = re.sub(r'CASE-2026-[A-Z0-9\-]+', case_number, clean_obs)
-                    
-                    run_obs = p_obs.add_run(clean_obs)
+                # Separate Observed Result Column
+                if col_observed is not None and col_observed < len(row.cells):
+                    cell_obs = row.cells[col_observed]
+                    cell_obs.text = ""
+                    p_obs = cell_obs.paragraphs[0]
+                    run_obs = p_obs.add_run(step.observed_result or "Verified")
                     run_obs.font.size = Pt(7.5)
                     run_obs.font.name = "Arial"
                     run_obs.font.color.rgb = RGBColor(71, 85, 105)
 
-                # Column 5: Initials / Date & Evidence Image
-                cell_init = row.cells[col_initials]
-                cell_init.text = ""
-                p_init = cell_init.paragraphs[0]
-                run_init = p_init.add_run(f"{initials} / {date_str}")
-                run_init.bold = True
-                run_init.font.size = Pt(8.5)
-                run_init.font.name = "Arial"
+                    cell_pf = row.cells[col_pass_fail]
+                    cell_pf.text = ""
+                    p_pf = cell_pf.paragraphs[0]
+                    run_status = p_pf.add_run(status_text)
+                    run_status.bold = True
+                    run_status.font.size = Pt(9)
+                    run_status.font.name = "Arial"
+                    run_status.font.color.rgb = RGBColor(15, 23, 42)
+                else:
+                    # Combined Pass/Fail and Observed Column
+                    cell_pf = row.cells[col_pass_fail]
+                    cell_pf.text = ""
+                    p_pf = cell_pf.paragraphs[0]
+                    run_status = p_pf.add_run(status_text)
+                    run_status.bold = True
+                    run_status.font.size = Pt(9)
+                    run_status.font.name = "Arial"
+                    run_status.font.color.rgb = RGBColor(15, 23, 42)
+
+                    if step.observed_result:
+                        p_obs = cell_pf.add_paragraph()
+                        p_obs.paragraph_format.space_before = Pt(2)
+                        run_obs = p_obs.add_run(step.observed_result)
+                        run_obs.font.size = Pt(7.5)
+                        run_obs.font.name = "Arial"
+                        run_obs.font.color.rgb = RGBColor(71, 85, 105)
+
+                # Initials / Date Column
+                if col_initials < len(row.cells):
+                    cell_init = row.cells[col_initials]
+                    cell_init.text = ""
+                    p_init = cell_init.paragraphs[0]
+                    init_val = step.tester_initials_date or f"{initials} / {date_str}"
+                    run_init = p_init.add_run(init_val)
+                    run_init.bold = True
+                    run_init.font.size = Pt(8.5)
+                    run_init.font.name = "Arial"
 
 
 
@@ -207,24 +245,38 @@ class DocxWriter:
                     except Exception as e:
                         print(f"Warning: could not insert appendix screenshot for {step.step_id}: {e}")
 
-        # 5. Global Dynamic Replacement of Placeholder Case IDs across all paragraphs and tables
-        for p in doc.paragraphs:
-            if temp_case_id:
-                p.text = p.text.replace("TMP-CASE-1001", temp_case_id).replace("TMP-CASE-7214", temp_case_id)
-            if case_number:
-                p.text = p.text.replace("CASE-2026-0042", case_number)
-
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for p in cell.paragraphs:
-                        if temp_case_id:
-                            p.text = p.text.replace("TMP-CASE-1001", temp_case_id).replace("TMP-CASE-7214", temp_case_id)
-                        if case_number:
-                            p.text = p.text.replace("CASE-2026-0042", case_number)
-
         doc.save(str(out_path))
         return str(out_path)
+
+    @staticmethod
+    def apply_qa_review_signature(
+        docx_path: str,
+        qa_sig: Any,
+        output_path: Optional[str] = None
+    ) -> str:
+        """
+        Applies QA Reviewer 21 CFR Part 11 Electronic Signature to the sign-off table in the executed .docx.
+        """
+        target_path = Path(output_path) if output_path else Path(docx_path)
+        doc = docx.Document(str(docx_path))
+
+        try:
+            dt = datetime.datetime.fromisoformat(qa_sig.signed_at_utc.replace("Z", "+00:00"))
+            sig_date = dt.strftime("%d-%b-%Y")
+        except Exception:
+            sig_date = qa_sig.signed_at_utc[:10]
+
+        for table in doc.tables:
+            if len(table.rows) >= 4 and len(table.columns) >= 2:
+                first_cell = table.rows[0].cells[0].text.strip().lower()
+                r3_cell = table.rows[3].cells[0].text.strip().lower() if len(table.rows) > 3 else ""
+                if "acceptance criteria" in first_cell or "reviewed by" in r3_cell:
+                    table.rows[3].cells[1].text = f"{qa_sig.signer_full_name} ({qa_sig.signer_initials})"
+                    if len(table.rows[3].cells) > 3:
+                        table.rows[3].cells[-1].text = sig_date
+
+        doc.save(str(target_path))
+        return str(target_path)
 
     @staticmethod
     def generate_companion_evidence_docx(

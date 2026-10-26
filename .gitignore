@@ -22,6 +22,8 @@ build/
 # Artifacts & Screenshots
 backend/artifacts/screenshots/
 backend/artifacts/temp/
+backend/artifacts/archive/
+backend/artifacts/plan_cache/
 *.tmp
 
 # IDE & OS

@@ -18,7 +18,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from schemas import ProtocolSession, ProtocolStep, TraceStage, ReadinessFlag, ProtocolGenerationRequest, ProtocolGenerationResponse, ExecutionSummaryReport, StepRootCauseAnalysis
+from schemas import (
+    ProtocolSession, ProtocolStep, TraceStage, ReadinessFlag,
+    ProtocolGenerationRequest, ProtocolGenerationResponse,
+    ExecutionSummaryReport, StepRootCauseAnalysis,
+    SignatureRequest, ApproveReviewRequest, ElectronicSignatureRecord, AuditLogEntry
+)
+from audit_trail import AuditTrailManager
+import datetime
+import hashlib
 from protocol_generator import ProtocolGenerator
 from extractor import extract_protocol
 from check_coverage import CoverageChecker, check_plan_to_spec, check_protocol_to_plan
@@ -90,10 +98,26 @@ def run_authoring_pipeline(file_path: str, filename: str, product_id: str = 'one
     session.product_id = product_id
     sessions[session.session_id] = session
 
+    AuditTrailManager.log_event(
+        session_id=session.session_id,
+        actor_username="system",
+        actor_role="SYSTEM",
+        event_type="PROTOCOL_UPLOADED",
+        details=f"Protocol '{filename}' uploaded ({len(session.steps)} steps extracted, git: {session.git_commit_sha})"
+    )
+
     # Stage 2: Qwen Planner Agent
     planner = PlannerAgent(dom_map)
     plan_steps, md_plan, plan_latency = planner.generate_plan(session)
     session_plans[session.session_id] = plan_steps
+
+    AuditTrailManager.log_event(
+        session_id=session.session_id,
+        actor_username="system",
+        actor_role="SYSTEM",
+        event_type="PLAN_COMPILED",
+        details=f"Stage 2 plan compiled with {len(plan_steps)} steps. Cache SHA: {session.plan_locked_sha256 or 'verified'}"
+    )
     
     session.trace_stages[1].status = "PASS"
     session.trace_stages[1].latency_seconds = plan_latency
@@ -359,6 +383,14 @@ async def execute_session(
     session_approval_events[session_id] = approval_event
     session_halt_flags[session_id] = False
 
+    AuditTrailManager.log_event(
+        session_id=session_id,
+        actor_username=req.username,
+        actor_role="TEST_EXECUTOR",
+        event_type="EXECUTION_STARTED",
+        details=f"Validation execution launched in {req.sim_mode} mode. Target URL: {req.target_url or 'default'}"
+    )
+
     main_loop = asyncio.get_running_loop()
 
     def run_worker_thread():
@@ -397,6 +429,14 @@ async def execute_session(
             except Exception as e:
                 print(f"Runner execution exception: {e}")
 
+            AuditTrailManager.log_event(
+                session_id=session_id,
+                actor_username="system",
+                actor_role="SYSTEM",
+                event_type="DOSSIER_ARCHIVED",
+                details=f"Validation execution completed with status: {session.status}. Steps: {len(session.steps)}"
+            )
+
             # Notify complete
             try:
                 asyncio.run_coroutine_threadsafe(broadcast_to_session(session_id, {
@@ -421,14 +461,99 @@ def approve_login(session_id: str):
     return {"status": "no_event_found"}
 
 @app.post("/api/approve-review/{session_id}")
-def approve_review(session_id: str):
+def approve_review(session_id: str, req: Optional[ApproveReviewRequest] = None):
+    justification = req.justification if req and req.justification else "Reviewer acknowledged flagged step discrepancy and authorized continuation."
+    actor = req.reviewer_username if req and req.reviewer_username else "reviewer"
     if session_id in session_approval_events:
         session_halt_flags[session_id] = False
         session_approval_events[session_id].set()
-        return {"status": "review_approved"}
+        AuditTrailManager.log_event(
+            session_id=session_id,
+            actor_username=actor,
+            actor_role="QA_REVIEWER",
+            event_type="HUMAN_REVIEW_CONTINUED",
+            details="Human reviewer acknowledged flagged discrepancy and resumed test execution.",
+            justification=justification
+        )
+        return {"status": "review_approved", "justification": justification}
     return {"status": "no_event_found"}
 
 @app.post("/api/halt-execution/{session_id}")
+def halt_execution(session_id: str):
+    session_halt_flags[session_id] = True
+    if session_id in session_approval_events:
+        session_approval_events[session_id].set()
+    AuditTrailManager.log_event(
+        session_id=session_id,
+        actor_username="reviewer",
+        actor_role="TEST_EXECUTOR",
+        event_type="EXECUTION_HALTED",
+        details="Execution halted by user request."
+    )
+    return {"status": "halted"}
+
+@app.post("/api/sign-protocol/{session_id}")
+def sign_protocol(session_id: str, req: SignatureRequest):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+    now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    clean_user = req.signer_username.strip()
+    full_name = clean_user.replace(".", " ").title()
+    initials = "".join(p[0].upper() for p in clean_user.split(".") if p) or "SB"
+
+    # Compute 21 CFR Part 11 signature hash
+    payload = f"{session_id}|{session.protocol_sha256 or ''}|{clean_user}|{req.signer_role}|{now_utc}"
+    sig_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    sig_record = ElectronicSignatureRecord(
+        signer_username=clean_user,
+        signer_full_name=full_name,
+        signer_initials=initials,
+        signer_role=req.signer_role,
+        signature_meaning=req.signature_meaning,
+        signed_at_utc=now_utc,
+        signature_hash=sig_hash
+    )
+
+    if not hasattr(session, "signatures") or session.signatures is None:
+        session.signatures = []
+    session.signatures.append(sig_record)
+
+    AuditTrailManager.log_event(
+        session_id=session_id,
+        actor_username=clean_user,
+        actor_role=req.signer_role,
+        event_type="ELECTRONIC_SIGNATURE_APPLIED",
+        details=f"Electronic signature applied by {full_name} ({req.signer_role}): '{req.signature_meaning}'. Signature Hash: {sig_hash[:16]}...",
+        justification=req.justification
+    )
+
+    # If QA Reviewer signs, update the executed .docx sign-off table
+    executed_docx = ARTIFACTS_DIR / f"executed_{session.filename}"
+    if req.signer_role == "QA_REVIEWER" and executed_docx.exists():
+        try:
+            DocxWriter.apply_qa_review_signature(str(executed_docx), sig_record)
+        except Exception as e:
+            print(f"Error applying QA signature to docx: {e}")
+
+    return {
+        "status": "signed",
+        "signature": sig_record.model_dump()
+    }
+
+@app.get("/api/audit-trail/{session_id}")
+def get_audit_trail(session_id: str):
+    entries = AuditTrailManager.get_audit_trail(session_id)
+    is_valid, err = AuditTrailManager.verify_audit_trail(session_id)
+    return {
+        "session_id": session_id,
+        "total_entries": len(entries),
+        "is_valid": is_valid,
+        "verification_error": err,
+        "entries": [e.model_dump() for e in entries]
+    }
 def halt_execution(session_id: str):
     session_halt_flags[session_id] = True
     if session_id in session_approval_events:

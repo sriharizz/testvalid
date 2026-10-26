@@ -5,10 +5,12 @@ import base64
 import time
 import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, Callable, List, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from playwright.async_api import async_playwright, Page, Locator
 from schemas import ProtocolStep, ProtocolSession, PlannedStep, PlannedFieldAction
+from aria_compiler import capture_scoped_aria_snapshot, heal_step_locator_with_aria
+from audit_trail import AuditTrailManager
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts"
 SCREENSHOTS_DIR = ARTIFACTS_DIR / "screenshots"
@@ -172,14 +174,37 @@ async def find_semantic_control(page: Page, label: str, control_type: str = "tex
     clean = re.sub(r'[\*:\(\)]', '', label).strip()
 
     search_targets = []
+    # 1. Active modal if present & visible
+    try:
+        modal_loc = page.locator("[role='dialog'], [role='alertdialog'], .modal, [class*='modal']").first
+        if await check_visible(modal_loc):
+            search_targets.append(modal_loc)
+    except Exception:
+        pass
+
+    # 2. Container (passed by caller, e.g. scope_target or sec_container)
     if container and hasattr(container, "get_by_label"):
         search_targets.append(container)
+
+    # 3. Section hint container
     if section_hint:
         sec_clean = re.sub(r'[\*:\(\)]', '', section_hint).replace('_', ' ').strip()
         sec_loc = page.locator(f"[data-section*='{sec_clean}' i], section:has-text('{sec_clean}'), div:has(h2:has-text('{sec_clean}')), div:has(h3:has-text('{sec_clean}')), div:has(h4:has-text('{sec_clean}'))").first
         search_targets.append(sec_loc)
+
+    # 4. Main frame / page
     search_targets.append(page)
 
+    # 5. Child iframes (for Salesforce/Veeva/embedded frames)
+    try:
+        if hasattr(page, "frames"):
+            for f in page.frames:
+                if f != page.main_frame:
+                    search_targets.append(f)
+    except Exception:
+        pass
+
+    clean_lower = clean.lower()
     for scope in search_targets:
         try:
             if not await check_visible(scope):
@@ -204,9 +229,29 @@ async def find_semantic_control(page: Page, label: str, control_type: str = "tex
                 c_loc = scope.get_by_role("combobox", name=re.compile(f"^{re.escape(clean)}", re.I)).first
                 if await check_visible(c_loc) and await is_control_type_match(c_loc, control_type):
                     return c_loc
+            elif control_type == "toggle":
+                c_loc = scope.get_by_role("checkbox", name=re.compile(f"^{re.escape(clean)}", re.I)).first
+                if await check_visible(c_loc):
+                    return c_loc
+                c_loc = scope.get_by_role("switch", name=re.compile(f"^{re.escape(clean)}", re.I)).first
+                if await check_visible(c_loc):
+                    return c_loc
 
-            # 4. Adjacent label XPath
-            c_loc = scope.locator(f"xpath=.//label[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{clean.lower()}')]/following::*[self::input or self::select or self::textarea][1]").first
+            # 4. Custom Framework label-to-control XPath (MUI, AntD, standard)
+            # 4a. Material UI (.MuiFormControl-root)
+            mui_xpath = f"xpath=.//div[contains(@class, 'MuiFormControl-root')][.//label[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{clean_lower}')]]//(input | select | textarea | div[@role='combobox'])"
+            c_loc = scope.locator(mui_xpath).first
+            if await check_visible(c_loc) and await is_control_type_match(c_loc, control_type):
+                return c_loc
+
+            # 4b. Ant Design (.ant-form-item)
+            antd_xpath = f"xpath=.//div[contains(@class, 'ant-form-item')][.//label[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{clean_lower}')]]//(input | select | textarea | div[contains(@class, 'ant-select')])"
+            c_loc = scope.locator(antd_xpath).first
+            if await check_visible(c_loc) and await is_control_type_match(c_loc, control_type):
+                return c_loc
+
+            # 4c. Adjacent label XPath
+            c_loc = scope.locator(f"xpath=.//label[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{clean_lower}')]/following::*[self::input or self::select or self::textarea or @role='combobox'][1]").first
             if await check_visible(c_loc) and await is_control_type_match(c_loc, control_type):
                 return c_loc
 
@@ -282,17 +327,30 @@ async def human_fill(page: Page, target: Any, value: str, broadcast_fn=None, lab
                 pass
     return False
 
-async def safe_select_option(page: Page, selector: Any, target: str, broadcast_fn=None, label: str = "") -> bool:
-    """Robust dropdown selector with smooth scrolling, virtual mouse glide, selection, and live frame broadcast."""
+async def safe_select_option(
+    page: Page,
+    selector: Any,
+    target: str,
+    allow_any_default: bool = False,
+    broadcast_fn=None,
+    label: str = ""
+) -> Tuple[bool, str]:
+    """
+    Universal dropdown selector supporting native <select> AND custom ARIA/React/MUI/AntD comboboxes.
+    Returns (success: bool, selected_text_or_error: str).
+    NEVER falls back to index=1 when an explicit target value is required.
+    """
     try:
         loc = selector if hasattr(selector, "is_visible") else page.locator(selector).first
-        if not await loc.is_visible():
-            return False
+        display_label = label or (selector if isinstance(selector, str) else "field").replace('#', '')
+
+        if not await check_visible(loc):
+            return False, f"Dropdown '{display_label}' is not visible"
 
         # 1. Smooth scroll to dropdown center
         try:
             await loc.evaluate("el => el.scrollIntoView({ behavior: 'smooth', block: 'center' })")
-            await page.wait_for_timeout(250)
+            await page.wait_for_timeout(150)
         except Exception:
             pass
 
@@ -304,103 +362,99 @@ async def safe_select_option(page: Page, selector: Any, target: str, broadcast_f
                 cx = box["x"] + box["width"] / 2
                 cy = box["y"] + box["height"] / 2
                 await page.evaluate(f"() => window.__moveVirtualCursor && window.__moveVirtualCursor({cx}, {cy})")
-                await page.mouse.move(cx, cy, steps=8)
-                await page.wait_for_timeout(150)
-                await page.evaluate(f"() => window.__showClickRipple && window.__showClickRipple({cx}, {cy})")
+                await page.mouse.move(cx, cy, steps=6)
                 await page.wait_for_timeout(100)
+                await page.evaluate(f"() => window.__showClickRipple && window.__showClickRipple({cx}, {cy})")
+                await page.wait_for_timeout(80)
         except Exception:
             pass
 
-        selected = False
-        display_label = label or (selector if isinstance(selector, str) else "field").replace('#', '')
+        tag = await loc.evaluate("el => el.tagName.toLowerCase()")
+        target_clean = (str(target) if target is not None else "").strip()
 
-        # Normalize common GxP boolean & status shorthands for instant sub-millisecond matching
-        target_str = str(target or "").strip()
-        norm_target = target_str
-        t_upper = norm_target.upper()
-        if t_upper in ["N", "NO", "FALSE"]:
-            norm_target = "No"
-        elif t_upper in ["Y", "YES", "TRUE"]:
-            norm_target = "Yes"
-        elif t_upper in ["NON_SERIOUS", "NON-SERIOUS"]:
-            norm_target = "No"
-        elif t_upper in ["SERIOUS"]:
-            norm_target = "Yes"
-        elif t_upper in ["RECOVERED", "RESOLVED"]:
-            norm_target = "Recovered/Resolved"
-        elif t_upper in ["FATAL"]:
-            norm_target = "Fatal"
+        # CASE A: Native HTML <select>
+        if tag == "select":
+            options = await loc.evaluate(
+                "el => Array.from(el.options).map((o, idx) => ({idx, text: o.text.trim(), val: o.value}))"
+            )
+            valid_options = [o for o in options if o["val"] != "" and not o["text"].lower().startswith("select")]
 
-        # If target is empty or generic placeholder (e.g. "(Select from dropdown)"), default to index 1
-        if not norm_target or norm_target.startswith("("):
-            try:
-                options = await loc.evaluate("el => Array.from(el.options).map(o => ({text: o.text.trim(), val: o.value}))")
-                if len(options) > 1:
-                    await loc.select_option(index=1, timeout=1500)
+            if (not target_clean or target_clean.startswith("(")) and allow_any_default:
+                if valid_options:
+                    chosen = valid_options[0]
+                    await loc.select_option(value=chosen["val"], timeout=2000)
                     if broadcast_fn:
-                        await broadcast_fn(f"Selected {display_label}: index 1")
-                    await page.wait_for_timeout(350)
-                    return True
-            except Exception:
-                pass
+                        await broadcast_fn(f"Selected {display_label}: {chosen['text']}")
+                    await page.wait_for_timeout(250)
+                    return True, chosen["text"]
+                return False, f"Dropdown '{display_label}' has no selectable options"
 
-        # 1. Exact label match
-        try:
-            await loc.select_option(label=norm_target, timeout=1200)
-            selected = True
-        except Exception:
-            pass
+            tgt_l = target_clean.lower().rstrip(".")
+            synonyms = {tgt_l}
+            if tgt_l in ["serious", "y", "yes", "true"]:
+                synonyms.update(["serious", "yes", "y", "true"])
+            elif tgt_l in ["non-serious", "not serious", "non_serious", "n", "no", "false"]:
+                synonyms.update(["non-serious", "not serious", "non_serious", "no", "n", "false"])
+            elif tgt_l in ["recovered", "resolved", "recovered/resolved"]:
+                synonyms.update(["recovered", "resolved", "recovered/resolved", "recovered / resolved"])
+            elif tgt_l in ["fatal"]:
+                synonyms.update(["fatal", "death"])
 
-        # 2. Try target with/without period (e.g. 'Dr.' vs 'Dr', 'Mr.' vs 'Mr')
-        if not selected:
-            alt = target + "." if not target.endswith(".") else target.rstrip(".")
-            try:
-                await loc.select_option(label=alt, timeout=1500)
-                selected = True
-            except Exception:
-                pass
-
-        # 3. Exact value match
-        if not selected:
-            try:
-                await loc.select_option(value=target, timeout=1500)
-                selected = True
-            except Exception:
-                pass
-
-        # 4. Normalized substring match against available options
-        if not selected:
-            options = await loc.evaluate("el => Array.from(el.options).map(o => ({text: o.text.trim(), val: o.value}))")
-            tgt_l = target.lower()
-            if tgt_l == "serious":
-                tgt_l = "yes"
-            elif tgt_l in ["not serious", "non-serious"]:
-                tgt_l = "no"
-
-            for opt in options:
-                if not opt["val"]:
-                    continue
-                opt_l = opt["text"].lower()
-                if opt_l == tgt_l or opt["val"].lower() == tgt_l or tgt_l in opt_l or opt_l in tgt_l:
+            for opt in valid_options:
+                opt_t = opt["text"].lower().rstrip(".")
+                opt_v = opt["val"].lower().rstrip(".")
+                if opt_t in synonyms or opt_v in synonyms or tgt_l in opt_t or opt_t in tgt_l:
                     await loc.select_option(value=opt["val"], timeout=2000)
-                    selected = True
-                    break
+                    if broadcast_fn:
+                        await broadcast_fn(f"Selected {display_label}: {opt['text']}")
+                    await page.wait_for_timeout(250)
+                    return True, opt["text"]
 
-        # Fallback to index 1 if still not selected
-        if not selected:
-            options = await loc.evaluate("el => Array.from(el.options).map(o => ({text: o.text.trim(), val: o.value}))")
-            if len(options) > 1:
-                await loc.select_option(index=1, timeout=1500)
-                selected = True
+            # STRICT FAILURE: Do NOT select index=1 when target was not found!
+            available_str = ", ".join(o["text"] for o in valid_options[:8])
+            return False, f"Option '{target_clean}' not found in '{display_label}'. Available: [{available_str}]"
 
-        if selected:
-            if broadcast_fn:
-                await broadcast_fn(f"Selected {display_label}: {target}")
-            await page.wait_for_timeout(350)
-            return True
+        # CASE B: Custom UI Framework Combobox / Div / Button Portal (MUI, AntD, Radix, React-Select)
+        await safe_click(loc, broadcast_fn=broadcast_fn, label=f"Open {display_label} dropdown")
+        await page.wait_for_timeout(250)
+
+        portal_options = page.locator(
+            "[role='listbox'] [role='option'], [role='menu'] [role='menuitem'], "
+            ".ant-select-item-option, .MuiMenuItem-root, .select__option"
+        )
+        count = await portal_options.count()
+        if count == 0:
+            return False, f"Custom combobox '{display_label}' did not open any option list"
+
+        if (not target_clean or target_clean.startswith("(")) and allow_any_default:
+            first_opt = portal_options.first
+            txt = (await first_opt.inner_text()).strip()
+            await safe_click(first_opt, broadcast_fn=broadcast_fn, label=f"Selected {txt}")
+            await page.wait_for_timeout(250)
+            return True, txt
+
+        tgt_l = target_clean.lower()
+        synonyms = {tgt_l}
+        if tgt_l in ["serious", "y", "yes", "true"]:
+            synonyms.update(["serious", "yes", "y", "true"])
+        elif tgt_l in ["non-serious", "not serious", "non_serious", "n", "no", "false"]:
+            synonyms.update(["non-serious", "not serious", "non_serious", "no", "n", "false"])
+
+        for i in range(count):
+            opt_loc = portal_options.nth(i)
+            if not await check_visible(opt_loc):
+                continue
+            opt_txt = (await opt_loc.inner_text()).strip()
+            opt_l = opt_txt.lower()
+            if opt_l in synonyms or opt_l == tgt_l or tgt_l in opt_l:
+                await safe_click(opt_loc, broadcast_fn=broadcast_fn, label=f"Selected {opt_txt}")
+                await page.wait_for_timeout(250)
+                return True, opt_txt
+
+        await page.keyboard.press("Escape")
+        return False, f"Option '{target_clean}' not found in custom combobox '{display_label}'"
     except Exception as e:
-        print(f"safe_select_option warning on {selector} with '{target}': {e}")
-    return False
+        return False, f"safe_select_option error on {selector} with '{target}': {e}"
 
 async def dismiss_dialog(page: Page, button_text: str = "OK", force_dismiss: bool = False, broadcast_fn=None) -> Optional[str]:
     """
@@ -484,6 +538,21 @@ async def check_for_ui_error_or_discrepancy(page: Page) -> Optional[str]:
     except Exception:
         pass
     return None
+
+async def count_data_rows(target: Any) -> int:
+    """Counts non-empty data rows in any table within target."""
+    try:
+        rows = target.locator("table tbody tr, [role='table'] [role='row'], [data-testid*='table'] tbody tr")
+        count = await rows.count()
+        valid = 0
+        for i in range(count):
+            txt = (await rows.nth(i).inner_text()).strip().lower()
+            if txt and not any(p in txt for p in ["no questions", "no records", "no data", "empty", "no items", "no rows"]):
+                valid += 1
+        return valid
+    except Exception:
+        return 0
+
 async def ensure_step_section_visible(page: Page, step: ProtocolStep, broadcast_fn=None):
     """
     Dynamically activates the tab/accordion section required by the step and smoothly scrolls to it.
@@ -629,7 +698,14 @@ async def get_active_section_container(page: Page, step: ProtocolStep) -> Any:
     return None
 
 
-async def verify_expected_result(page: Page, step: ProtocolStep, action_dialog_text: str = '') -> tuple[bool, str, Optional[str]]:
+async def verify_expected_result(
+    page: Page,
+    step: ProtocolStep,
+    action_dialog_text: str = '',
+    pre_table_rows: int = 0,
+    failed_http_responses: Optional[List[str]] = None,
+    execution_failures: Optional[List[str]] = None
+) -> tuple[bool, str, Optional[str]]:
     """
     Genuine, Product-Agnostic GxP Expected vs Actual Result Verification Engine.
     Evaluates explicit, typed StepAssertions against the live browser state.
@@ -685,9 +761,29 @@ async def verify_expected_result(page: Page, step: ProtocolStep, action_dialog_t
     if detected_error and not has_expected_error_assertion:
         return False, f"Discrepancy: Unexpected UI error displayed: '{detected_error}'.", detected_error
 
+    # Check for invalid fields in DOM for positive tests
+    if not has_expected_error_assertion:
+        try:
+            invalid_ctrl = page.locator("[aria-invalid='true'], :invalid, .Mui-error, .ant-form-item-explain-error").first
+            if await check_visible(invalid_ctrl):
+                inv_txt = (await invalid_ctrl.inner_text()).strip() or "Form field validation error"
+                return False, f"Discrepancy: UI validation error detected: '{inv_txt}'.", inv_txt
+        except Exception:
+            pass
+
     # 3. Evaluate each typed assertion deterministically
     passed_details = []
     failed_details = []
+
+    # Include explicit execution failures (e.g. Missing/failed controls in positive step)
+    if execution_failures:
+        for ef in execution_failures:
+            failed_details.append(ef)
+
+    # Include HTTP errors on positive steps
+    if not has_expected_error_assertion and failed_http_responses:
+        for hr in failed_http_responses[:3]:
+            failed_details.append(f"Network error: {hr}")
 
     for assertion in (step.assertions or []):
         # A. ENTITY_CREATED (Case ID, Record ID, Signal ID)
@@ -793,29 +889,35 @@ async def verify_expected_result(page: Page, step: ProtocolStep, action_dialog_t
         elif assertion.assertion_type == "TABLE_DATA":
             sec_container = await get_active_section_container(page, step)
             table_scope = sec_container if sec_container else page
-            rows = table_scope.locator("table tbody tr, [role='table'] [role='row'], [data-testid*='table'] tbody tr")
-            row_count = 0
-            try:
-                count = await rows.count()
-                for i in range(count):
-                    r_txt = (await rows.nth(i).inner_text()).strip().lower()
-                    if r_txt and not any(p in r_txt for p in ["no questions", "no records", "no data", "empty", "no items"]):
-                        row_count += 1
-            except Exception:
-                pass
+            post_table_rows = await count_data_rows(table_scope)
 
             if assertion.target_text == "deleted":
-                if row_count == 0 or "delete" in combined_feedback.lower() or "success" in combined_feedback.lower():
-                    passed_details.append("Record deletion confirmed in table")
+                if post_table_rows < pre_table_rows or post_table_rows == 0:
+                    passed_details.append(f"Record deletion confirmed in table (rows decreased from {pre_table_rows} to {post_table_rows})")
+                elif "delete" in combined_feedback.lower() or "success" in combined_feedback.lower():
+                    passed_details.append("Record deletion confirmed by application notification")
                 else:
-                    failed_details.append("Discrepancy: Record still visible in table after deletion")
+                    failed_details.append(f"Discrepancy: Record still visible in table after deletion (row count: {post_table_rows})")
             else:
-                if row_count > 0:
-                    passed_details.append(f"Record presence confirmed in table ({row_count} record(s) found)")
-                elif combined_feedback and any(k in combined_feedback.lower() for k in ["success", "added", "saved"]):
+                # Row addition / verification
+                must_contain = getattr(assertion, "must_contain_values", None) or []
+                has_content_match = True
+                if must_contain:
+                    has_content_match = False
+                    rows = table_scope.locator("table tbody tr, [role='table'] [role='row']")
+                    rc = await rows.count()
+                    for i in range(rc):
+                        row_txt = await rows.nth(i).inner_text()
+                        if any(val.lower() in row_txt.lower() for val in must_contain):
+                            has_content_match = True
+                            break
+
+                if (post_table_rows > pre_table_rows or (pre_table_rows == 0 and post_table_rows > 0)) and has_content_match:
+                    passed_details.append(f"Record presence confirmed in table ({post_table_rows} record(s) found)")
+                elif combined_feedback and any(k in combined_feedback.lower() for k in ["success", "added", "saved"]) and has_content_match:
                     passed_details.append(f"Record addition confirmed by application: '{combined_feedback[:80]}'")
                 else:
-                    failed_details.append("Discrepancy: Expected record was not displayed in the table")
+                    failed_details.append(f"Discrepancy: Expected record addition not reflected in table (pre: {pre_table_rows}, post: {post_table_rows})")
 
         # G. UI_ELEMENT (Hyperlink, FAQ accordion, preview modal)
         elif assertion.assertion_type == "UI_ELEMENT":
@@ -842,14 +944,26 @@ async def verify_expected_result(page: Page, step: ProtocolStep, action_dialog_t
         # H. FILE_DOWNLOAD (Export or document download verification)
         elif assertion.assertion_type == "FILE_DOWNLOAD":
             doc_type = (assertion.target_text or "file").lower()
-            if combined_feedback and any(k in combined_feedback.lower() for k in ["download", "export", "success", "file", "saved"]):
-                passed_details.append(f"File export/download ({doc_type}) confirmed by application: '{combined_feedback[:80]}'")
-            else:
-                btn = page.locator("button:has-text('Export'), button:has-text('Download'), a[download]").first
-                if await check_visible(btn):
-                    passed_details.append(f"File export/download action ({doc_type}) verified in UI")
-                else:
-                    failed_details.append(f"Discrepancy: File export/download ({doc_type}) could not be confirmed")
+            download_confirmed = False
+            dl_btn = page.locator("button:has-text('Export'), button:has-text('Download'), a[download]").first
+            if await check_visible(dl_btn):
+                try:
+                    async with page.expect_download(timeout=5000) as download_info:
+                        await safe_click(dl_btn)
+                    download = await download_info.value
+                    if download:
+                        passed_details.append(f"File '{download.suggested_filename}' downloaded successfully")
+                        download_confirmed = True
+                except Exception:
+                    pass
+
+            if not download_confirmed:
+                if combined_feedback and any(k in combined_feedback.lower() for k in ["download", "export", "success", "file", "saved"]):
+                    passed_details.append(f"File export/download ({doc_type}) confirmed by application: '{combined_feedback[:80]}'")
+                    download_confirmed = True
+
+            if not download_confirmed:
+                failed_details.append(f"Discrepancy: File export/download ({doc_type}) could not be confirmed")
 
         # I. VIEW_ACTIVE (URL / Header / Table Navigation)
         elif assertion.assertion_type == "VIEW_ACTIVE":
@@ -859,35 +973,37 @@ async def verify_expected_result(page: Page, step: ProtocolStep, action_dialog_t
                 if "login" in current_url:
                     passed_details.append(f"Login view verified at {page.url}")
                 else:
-                    passed_details.append(f"Authentication interface verified at {page.url}")
+                    failed_details.append(f"Expected login view, but current URL is {page.url}")
             elif tgt in ["intake", "shell", "home"]:
                 has_auth = await check_visible(page.locator("[data-testid='user-profile-icon'], button:has-text('Logout'), a[href*='/intake'], button:has-text('Intake')").first)
                 if "login" not in current_url and has_auth:
                     passed_details.append(f"Authenticated session verified at {page.url}")
-                elif "login" not in current_url:
-                    passed_details.append(f"Session authenticated at {page.url}")
                 else:
-                    failed_details.append(f"Authentication failed: URL remained at {page.url}")
+                    failed_details.append(f"Expected active session for '{tgt}', but session not active at URL {page.url}")
             elif tgt in ["audit", "audit history"]:
                 has_audit = await check_visible(page.locator("table, [data-testid='audit-table'], h1:has-text('Audit'), h2:has-text('Audit')").first)
                 if has_audit or "audit" in current_url:
                     passed_details.append("Audit History view verified")
                 else:
-                    failed_details.append("Audit History table was not displayed")
+                    failed_details.append(f"Audit History table was not displayed at URL {page.url}")
             elif tgt in ["manual case", "registration"]:
                 has_hdr = await check_visible(page.locator("h1:has-text('Manual Case'), h2:has-text('Manual Case'), div:has-text('General Information')").first)
                 if has_hdr or "manual-case-registration" in current_url:
                     passed_details.append("Manual Case Registration interface verified")
                 else:
-                    passed_details.append(f"View verified at {page.url}")
+                    failed_details.append(f"Manual Case Registration interface was not displayed at URL {page.url}")
             elif tgt in ["case processing"]:
                 has_proc = await check_visible(page.locator("h1:has-text('Case Processing'), h2:has-text('Case Processing'), div:has-text('Case Processing')").first)
                 if has_proc or "case-processing" in current_url:
                     passed_details.append("Case Processing view verified")
                 else:
-                    passed_details.append(f"View verified at {page.url}")
+                    failed_details.append(f"Case Processing view was not displayed at URL {page.url}")
             else:
-                passed_details.append(f"View '{assertion.target_text}' verified at {page.url}")
+                has_tgt_heading = await check_visible(page.locator(f"h1:has-text('{assertion.target_text}'), h2:has-text('{assertion.target_text}'), h3:has-text('{assertion.target_text}')").first)
+                if tgt in current_url or has_tgt_heading:
+                    passed_details.append(f"View '{assertion.target_text}' verified at {page.url}")
+                else:
+                    failed_details.append(f"Expected view '{assertion.target_text}' not active at URL {page.url}")
 
         # J. STATE_PERSISTED
         elif assertion.assertion_type == "STATE_PERSISTED":
@@ -966,7 +1082,7 @@ class PlaywrightRunner:
                     except Exception:
                         pass
 
-            async def capture_evidence(step_id: str, tag_suffix: str = "") -> str:
+            async def capture_evidence(step_id: str, tag_suffix: str = "", stamp_banner: bool = True) -> str:
                 filename = f"{step_id}{tag_suffix}.png"
                 filepath = session_screenshots_dir / filename
                 # Momentarily hide virtual cursor so official Word doc evidence is pristine
@@ -975,7 +1091,8 @@ class PlaywrightRunner:
                 except Exception:
                     pass
                 await page.screenshot(path=str(filepath))
-                stamp_gxp_metadata_banner(filepath, step_id=step_id, case_id=session.runtime_state.get("case_number", ""), tester=creds.get("username", "sirihari.banda"))
+                if stamp_banner:
+                    stamp_gxp_metadata_banner(filepath, step_id=step_id, case_id=session.runtime_state.get("case_number", ""), tester=creds.get("username", "sirihari.banda"))
                 try:
                     await page.evaluate("() => { const c = document.getElementById('playwright-virtual-cursor'); if (c) c.style.display = 'flex'; }")
                 except Exception:
@@ -1032,6 +1149,20 @@ class PlaywrightRunner:
                     # Dynamically activate the required tab/accordion and smoothly scroll to it with live streaming
                     await ensure_step_section_visible(page, step, broadcast_fn=broadcast_frame)
                     sec_container = await get_active_section_container(page, step)
+
+                    # Capture pre-step table row count and listen for HTTP failures
+                    pre_table_rows = await count_data_rows(sec_container if sec_container else page)
+                    failed_http_responses: List[str] = []
+
+                    def on_response(response):
+                        try:
+                            if response.status >= 400 and response.request.resource_type in ["xhr", "fetch"]:
+                                failed_http_responses.append(f"{response.request.method} {response.url} -> {response.status}")
+                        except Exception:
+                            pass
+
+                    page.on("response", on_response)
+                    execution_failures: List[str] = []
 
                     # -------------------------------------------------------------
                     # DYNAMIC SEMANTIC STEP EXECUTION (ZERO HARDCODED ELEMENT IDs)
@@ -1251,73 +1382,105 @@ class PlaywrightRunner:
                                         step_dialog_feedback = await dismiss_dialog(page, "OK", broadcast_fn=broadcast_frame)
 
                         # E. Dynamically populate form fields (Container Scoped)
+                        missing_or_failed_fields: List[str] = []
 
                         for fa in (planned_step.field_actions if planned_step else []):
-                            loc = await find_semantic_control(page, fa.label, fa.control_type, section_hint=fa.section, container=scope_target)
-                            if loc:
-                                if fa.control_type in ["text", "date"]:
-                                    val = fa.target_value if not (is_neg and "empty" in proc_text) else ""
-                                    # Fallback synthetic text if value is placeholder or empty on a positive step
-                                    if not val and not is_neg:
-                                        if fa.control_type == "date" or "date" in fa.label.lower():
-                                            val = datetime.date.today().isoformat()
-                                        else:
-                                            val = f"Standard Test {fa.label}"
-                                    await human_fill(page, loc, val, broadcast_fn=broadcast_frame, label=fa.label)
-                                    filled_count += 1
-                                elif fa.control_type == "select":
-                                    val = fa.target_value
-                                    await safe_select_option(page, loc, val, broadcast_fn=broadcast_frame, label=fa.label)
-                                    filled_count += 1
-                                elif fa.control_type == "toggle":
-                                    target_state = fa.target_value.lower() == "true"
-                                    try:
-                                        await loc.set_checked(target_state)
-                                        filled_count += 1
-                                    except Exception:
-                                        await safe_click(loc, broadcast_fn=broadcast_frame, label=f"Toggled {fa.label}")
-                                elif fa.control_type == "modal_search_select":
-                                    # 1. If an input control exists for this label (e.g. Reported Term or Product Name), fill it directly first!
-                                    term_input = await find_semantic_control(page, fa.label, "text", section_hint=fa.section, container=scope_target)
-                                    if term_input:
-                                        await human_fill(page, term_input, fa.target_value, broadcast_fn=broadcast_frame, label=fa.label)
+                            if fa.control_type == "auto_populate_verify" or fa.expect_auto_populated:
+                                continue  # Verified in post-action assertion phase
 
-                                    # 2. Check for search trigger button (modal search or inline MedDRA coder)
-                                    search_btn = page.locator(f"[aria-label*='Search'][aria-label*='{fa.label}'], button[data-search='{fa.label}'], button:has-text('Search')").first
-                                    if sec_container:
-                                        c_btn = sec_container.locator("button[aria-label*='Search'], button:has-text('Search')").first
-                                        if await check_visible(c_btn):
-                                            search_btn = c_btn
-                                    if await check_visible(search_btn):
-                                        await safe_click(search_btn, broadcast_fn=broadcast_frame, label=f"Opened search modal for {fa.label}")
-                                        await page.wait_for_timeout(400)
-                                        modal_in = page.locator("[role='dialog'] input, .modal input").first
-                                        if await check_visible(modal_in):
-                                            await modal_in.fill(fa.target_value)
-                                            modal_search_go = page.locator("[role='dialog'] button:has-text('Search')").first
-                                            if await check_visible(modal_search_go):
-                                                await safe_click(modal_search_go)
-                                                await page.wait_for_timeout(400)
-                                            row = page.locator("[role='dialog'] input[type='radio'], [role='dialog'] table tbody tr").first
-                                            if await check_visible(row):
-                                                await safe_click(row)
-                                            sel_btn = page.locator("[role='dialog'] button:has-text('Select'), [role='dialog'] button:has-text('Confirm')").first
-                                            if await check_visible(sel_btn):
-                                                await safe_click(sel_btn, broadcast_fn=broadcast_frame, label=f"Selected {fa.target_value}")
-                                                # Enforce Modal Disposal Barrier: wait for search dialog to close!
-                                                try:
-                                                    await page.locator("[role='dialog'], .modal").first.wait_for(state="hidden", timeout=4000)
-                                                except Exception:
-                                                    pass
-                                                await page.wait_for_timeout(350)
+                            loc = await find_semantic_control(page, fa.label, fa.control_type, section_hint=fa.section, container=scope_target)
+                            if not loc:
+                                # Attempt 1 JIT ARIA Healer lookup before failing
+                                loc = await heal_step_locator_with_aria(page, step, fa, scope_target)
+
+                            if not loc:
+                                missing_or_failed_fields.append(f"Control '{fa.label}' ({fa.control_type}) not found on screen")
+                                continue
+
+                            if fa.control_type in ["text", "date"]:
+                                val = fa.target_value if not (is_neg and "empty" in proc_text) else ""
+                                # Fallback synthetic text if value is placeholder or empty on a positive step
+                                if not val and not is_neg:
+                                    if fa.control_type == "date" or "date" in fa.label.lower():
+                                        val = datetime.date.today().isoformat()
+                                    else:
+                                        val = f"Standard Test {fa.label}"
+                                ok = await human_fill(page, loc, val, broadcast_fn=broadcast_frame, label=fa.label)
+                                if not ok:
+                                    missing_or_failed_fields.append(f"Failed to fill '{fa.label}' with '{val}'")
+                                else:
                                     filled_count += 1
+
+                            elif fa.control_type == "select":
+                                allow_any = not bool(fa.target_value) or str(fa.target_value).startswith("(")
+                                ok, detail = await safe_select_option(page, loc, fa.target_value, allow_any_default=allow_any, broadcast_fn=broadcast_frame, label=fa.label)
+                                if not ok:
+                                    missing_or_failed_fields.append(detail)
+                                else:
+                                    filled_count += 1
+
+                            elif fa.control_type == "toggle":
+                                target_state = str(fa.target_value).lower() in ["true", "yes", "1", "y"]
+                                try:
+                                    await loc.set_checked(target_state)
+                                    filled_count += 1
+                                except Exception:
+                                    ok = await safe_click(loc, broadcast_fn=broadcast_frame, label=f"Toggled {fa.label}")
+                                    if ok:
+                                        filled_count += 1
+                                    else:
+                                        missing_or_failed_fields.append(f"Failed to toggle '{fa.label}'")
+
+                            elif fa.control_type == "modal_search_select":
+                                # 1. If an input control exists for this label (e.g. Reported Term or Product Name), fill it directly first!
+                                term_input = await find_semantic_control(page, fa.label, "text", section_hint=fa.section, container=scope_target)
+                                if term_input:
+                                    await human_fill(page, term_input, fa.target_value, broadcast_fn=broadcast_frame, label=fa.label)
+
+                                # 2. Check for search trigger button (modal search or inline MedDRA coder)
+                                search_btn = page.locator(f"[aria-label*='Search'][aria-label*='{fa.label}'], button[data-search='{fa.label}'], button:has-text('Search')").first
+                                if sec_container:
+                                    c_btn = sec_container.locator("button[aria-label*='Search'], button:has-text('Search')").first
+                                    if await check_visible(c_btn):
+                                        search_btn = c_btn
+                                if await check_visible(search_btn):
+                                    await safe_click(search_btn, broadcast_fn=broadcast_frame, label=f"Opened search modal for {fa.label}")
+                                    await page.wait_for_timeout(400)
+                                    modal_in = page.locator("[role='dialog'] input, .modal input").first
+                                    if await check_visible(modal_in):
+                                        await modal_in.fill(fa.target_value)
+                                        modal_search_go = page.locator("[role='dialog'] button:has-text('Search')").first
+                                        if await check_visible(modal_search_go):
+                                            await safe_click(modal_search_go)
+                                            await page.wait_for_timeout(400)
+                                        row = page.locator("[role='dialog'] input[type='radio'], [role='dialog'] table tbody tr").first
+                                        if await check_visible(row):
+                                            await safe_click(row)
+                                        sel_btn = page.locator("[role='dialog'] button:has-text('Select'), [role='dialog'] button:has-text('Confirm')").first
+                                        if await check_visible(sel_btn):
+                                            await safe_click(sel_btn, broadcast_fn=broadcast_frame, label=f"Selected {fa.target_value}")
+                                            # Enforce Modal Disposal Barrier: wait for search dialog to close!
+                                            try:
+                                                await page.locator("[role='dialog'], .modal").first.wait_for(state="hidden", timeout=4000)
+                                            except Exception:
+                                                pass
+                                            await page.wait_for_timeout(350)
+                                    filled_count += 1
+                                elif term_input:
+                                    filled_count += 1
+                                else:
+                                    missing_or_failed_fields.append(f"Search control for '{fa.label}' not found")
+
+                        if not is_neg and missing_or_failed_fields:
+                            execution_failures.extend(missing_or_failed_fields)
 
                         # Universal Modal Safety Fill: If inside an active modal on a positive action step and 0 fields were filled via planned_step:
                         if not is_neg and is_dialog_active and filled_count == 0:
                             for modal_sel in await active_dialog.locator("select").all():
                                 if await check_visible(modal_sel):
-                                    await safe_select_option(page, modal_sel, target="", broadcast_fn=broadcast_frame, label="Modal Dropdown")
-                                    filled_count += 1
+                                    ok, _ = await safe_select_option(page, modal_sel, target="", allow_any_default=True, broadcast_fn=broadcast_frame, label="Modal Dropdown")
+                                    if ok:
+                                        filled_count += 1
                             for modal_inp in await active_dialog.locator("input[type='text'], input:not([type]), textarea").all():
                                 if await check_visible(modal_inp):
                                     cur_val = await modal_inp.input_value()
@@ -1337,8 +1500,9 @@ class PlaywrightRunner:
                             resp_sels = await page.locator("table tbody tr select").all()
                             for rsel in resp_sels:
                                 if await check_visible(rsel):
-                                    await safe_select_option(page, rsel, "Yes", broadcast_fn=broadcast_frame, label="Question Response")
-                                    filled_count += 1
+                                    ok, _ = await safe_select_option(page, rsel, "Yes", allow_any_default=False, broadcast_fn=broadcast_frame, label="Question Response")
+                                    if ok:
+                                        filled_count += 1
 
                         # F2. Handle Modal Submits (if inside Additional Questions or template modal)
                         modal_submitted = False
@@ -1395,13 +1559,30 @@ class PlaywrightRunner:
                         if "save and submit" in proc_text:
                             submit_btn = page.locator("button:has-text('Save and Submit')").first
                             if await check_visible(submit_btn):
+                                form_img = None
+                                if step.screenshot_required or getattr(step, "requires_form_screenshot", False) or filled_count > 0:
+                                    form_img = await capture_evidence(step.step_id, "_form", stamp_banner=False)
+
                                 await safe_click(submit_btn, broadcast_fn=broadcast_frame, label="Clicked Save and Submit")
                                 await page.wait_for_timeout(500)
+
+                                # Wait for modal dialog or toast confirmation
+                                try:
+                                    await page.locator("[role='dialog'], [role='alertdialog'], .modal, [role='status'], .toast").first.wait_for(state="visible", timeout=4000)
+                                    await page.wait_for_timeout(300)
+                                except Exception:
+                                    pass
+
+                                modal_img = None
+                                if step.screenshot_required or getattr(step, "requires_modal_screenshot", False):
+                                    modal_img = await capture_evidence(step.step_id, "_modal", stamp_banner=False)
+
                                 step_dialog_feedback = await dismiss_dialog(page, "Yes", broadcast_fn=broadcast_frame) or await dismiss_dialog(page, "OK", broadcast_fn=broadcast_frame)
                                 try:
                                     await page.wait_for_load_state("networkidle", timeout=8000)
                                 except Exception:
                                     await page.wait_for_timeout(1000)
+
                                 # Universal GxP Entity ID extraction on case submission (OnePV, Signal, 1PV)
                                 try:
                                     entity_matches = re.findall(r"\b([A-Z]{2,8}(?:-[A-Z]{2,8})?-(?:\d{4}-)?\d+)\b", await page.locator("body").text_content() or "")
@@ -1410,10 +1591,19 @@ class PlaywrightRunner:
                                             session.runtime_state["case_number"] = eid
                                 except Exception:
                                     pass
-                                if step.screenshot_required:
-                                    step_img = await capture_evidence(step.step_id)
-                                    step.combined_screenshot_path = step_img
-                                    step.screenshot_url = f"/api/artifacts/screenshots/{session.session_id}/{step.step_id}.png"
+
+                                if step.screenshot_required or form_img or modal_img:
+                                    combined_path = session_screenshots_dir / f"{step.step_id}.png"
+                                    if form_img and modal_img:
+                                        stitch_two_stage_screenshots(Path(form_img), Path(modal_img), combined_path)
+                                    elif form_img:
+                                        Image.open(form_img).save(combined_path)
+                                    elif modal_img:
+                                        Image.open(modal_img).save(combined_path)
+                                    else:
+                                        await capture_evidence(step.step_id, stamp_banner=False)
+                                    stamp_gxp_metadata_banner(combined_path, step_id=step.step_id, case_id=session.runtime_state.get("case_number", ""), tester=creds.get("username", "sirihari.banda"))
+                                    assign_step_screenshots(step, session.session_id, form_img=form_img, modal_img=modal_img, combined_path=combined_path)
 
                         elif not modal_submitted and any(k in proc_text or k in intent.lower() for k in ["save", "submit", "register", "add"]):
                             save_btn = None
@@ -1434,23 +1624,39 @@ class PlaywrightRunner:
                                     pass
 
                             if save_btn and await check_visible(save_btn):
+                                form_img = None
+                                if step.screenshot_required or getattr(step, "requires_form_screenshot", False) or filled_count > 0:
+                                    form_img = await capture_evidence(step.step_id, "_form", stamp_banner=False)
+
                                 await safe_click(save_btn, broadcast_fn=broadcast_frame, label="Clicked Save")
                                 await page.wait_for_timeout(500)
 
                                 # Wait for modal dialog if registration or confirmation is expected
-                                if step.capture_before_modal_dismiss or "temporary case" in (step.expected_result or "").lower():
+                                if step.capture_before_modal_dismiss or "temporary case" in (step.expected_result or "").lower() or getattr(step, "requires_modal_screenshot", False):
                                     try:
                                         await page.locator("[role='dialog'], [role='alertdialog'], .modal").first.wait_for(state="visible", timeout=4000)
                                         await page.wait_for_timeout(300)
                                     except Exception:
                                         pass
 
-                                if step.capture_before_modal_dismiss or step.screenshot_required:
-                                    step_img = await capture_evidence(step.step_id)
-                                    step.combined_screenshot_path = step_img
-                                    step.screenshot_url = f"/api/artifacts/screenshots/{session.session_id}/{step.step_id}.png"
+                                modal_img = None
+                                if step.capture_before_modal_dismiss or step.screenshot_required or getattr(step, "requires_modal_screenshot", False):
+                                    modal_img = await capture_evidence(step.step_id, "_modal", stamp_banner=False)
 
                                 step_dialog_feedback = await dismiss_dialog(page, "OK", broadcast_fn=broadcast_frame)
+
+                                if step.screenshot_required or form_img or modal_img:
+                                    combined_path = session_screenshots_dir / f"{step.step_id}.png"
+                                    if form_img and modal_img:
+                                        stitch_two_stage_screenshots(Path(form_img), Path(modal_img), combined_path)
+                                    elif form_img:
+                                        Image.open(form_img).save(combined_path)
+                                    elif modal_img:
+                                        Image.open(modal_img).save(combined_path)
+                                    else:
+                                        await capture_evidence(step.step_id, stamp_banner=False)
+                                    stamp_gxp_metadata_banner(combined_path, step_id=step.step_id, case_id=session.runtime_state.get("case_number", ""), tester=creds.get("username", "sirihari.banda"))
+                                    assign_step_screenshots(step, session.session_id, form_img=form_img, modal_img=modal_img, combined_path=combined_path)
 
                         elif "hover" in proc_text or "hover" in scen_text or "right mark" in proc_text:
                             hover_target = page.locator("[data-testid='meddra-check'], svg.lucide-check, [aria-label*='MedDRA'], span:has-text('Coded')").first
@@ -1505,17 +1711,40 @@ class PlaywrightRunner:
 
                         step.observed_result = f"Dynamic step executed: {filled_count} fields populated & actions verified."
 
+                    # Detach HTTP response listener before verification
+                    try:
+                        page.remove_listener("response", on_response)
+                    except Exception:
+                        pass
+
                     # Genuine Expected vs Actual Result GxP Verification
-                    is_passed, observed_summary, failure_detail = await verify_expected_result(page, step, action_dialog_text=locals().get('step_dialog_feedback', ''))
+                    is_passed, observed_summary, failure_detail = await verify_expected_result(
+                        page,
+                        step,
+                        action_dialog_text=locals().get('step_dialog_feedback', ''),
+                        pre_table_rows=pre_table_rows,
+                        failed_http_responses=failed_http_responses,
+                        execution_failures=execution_failures
+                    )
                     step.latency_ms = int((time.time() - start_step_time) * 1000)
-                    step.tester_initials_date = "S.B. / 15-Oct-2026"
-                    step.initials_date = "S.B. / 15-Oct-2026"
+                    now_utc_str = datetime.datetime.now(datetime.timezone.utc).strftime("%d-%b-%Y")
+                    user_init = "".join(part[0].upper() for part in creds.get("username", "tester").split(".") if part) or "SB"
+                    step.tester_initials_date = f"{user_init} / {now_utc_str}"
+                    step.initials_date = f"{user_init} / {now_utc_str}"
 
                     if is_passed:
                         step.status = "PASS"
                         step.pass_fail_text = "Pass"
                         step.observed_result = observed_summary
                         step.failure_reason = None
+                        AuditTrailManager.log_event(
+                            session_id=session.session_id,
+                            actor_username=creds.get("username", "tester"),
+                            actor_role="TEST_EXECUTOR",
+                            event_type="STEP_PASSED",
+                            step_id=step.step_id,
+                            details=f"Step {step.step_id} PASSED in {step.latency_ms}ms: {observed_summary}"
+                        )
                         if is_negative_test_step(step):
                             # Ensure any stacked validation error dialog is actively cleared
                             for _ in range(3):
@@ -1535,6 +1764,14 @@ class PlaywrightRunner:
                         step.observed_result = observed_summary
                         step.failure_reason = failure_detail
                         step.latency_ms = int((time.time() - start_step_time) * 1000)
+                        AuditTrailManager.log_event(
+                            session_id=session.session_id,
+                            actor_username=creds.get("username", "tester"),
+                            actor_role="TEST_EXECUTOR",
+                            event_type="STEP_FAILED",
+                            step_id=step.step_id,
+                            details=f"Step {step.step_id} FAILED in {step.latency_ms}ms: {failure_detail or observed_summary}"
+                        )
                         if step.screenshot_required and not step.combined_screenshot_path:
                             err_img = await capture_evidence(step.step_id)
                             step.combined_screenshot_path = err_img
