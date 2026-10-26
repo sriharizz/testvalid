@@ -36,6 +36,7 @@ export const App: React.FC = () => {
 
   // Authentication & Session State
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [folderRefreshTrigger, setFolderRefreshTrigger] = useState<number>(0);
 
   // Target Environment & Credentials States
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -141,6 +142,7 @@ export const App: React.FC = () => {
       await sleep(250);
 
       setSession(data);
+      setFolderRefreshTrigger((prev) => prev + 1);
       // Automatically select first step so document immediately shows Step 1
       setSelectedStepId(data.steps && data.steps.length > 0 ? data.steps[0].step_id : null);
     } catch (err) {
@@ -447,6 +449,7 @@ export const App: React.FC = () => {
               onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
               onLogout={() => setIsLoggedIn(false)}
               isSidebar={true}
+              refreshTrigger={folderRefreshTrigger}
             />
 
             {/* Column 2: Live Test Sequence (Connected Series) */}

@@ -145,143 +145,108 @@ def run_authoring_pipeline(file_path: str, filename: str, product_id: str = 'one
 def health():
     return {"status": "ok", "system": "Clinevo OnePV Validation Portal"}
 
+CATALOG_PATH = ARTIFACTS_DIR / "protocol_catalog.json"
+
+def get_protocol_catalog() -> Dict[str, List[Dict[str, Any]]]:
+    """Returns the persistent protocol catalog grouped by product_id."""
+    catalog: Dict[str, List[Dict[str, Any]]] = {
+        "onepv": [],
+        "signal": [],
+        "1pv": [],
+        "custom": []
+    }
+    if CATALOG_PATH.exists():
+        try:
+            with open(CATALOG_PATH, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    for k, v in loaded.items():
+                        if isinstance(v, list):
+                            catalog[k] = v
+        except Exception as e:
+            print(f"Error reading catalog: {e}")
+
+    # Seed baseline protocols for onepv from UPLOADS_DIR if empty
+    if not catalog["onepv"]:
+        for f in UPLOADS_DIR.glob("*.docx"):
+            name = f.name
+            if "_" in name and len(name.split("_")[0]) == 8:
+                continue
+            is_oq = "OQ" in name.upper() or "OPERATIONAL" in name.upper()
+            is_pq = "PQ" in name.upper() or "PERFORMANCE" in name.upper()
+            doc_no = name.split(" - ")[0] if " - " in name else name
+            step_count = 15 if is_oq else (12 if is_pq else 8)
+            catalog["onepv"].append({
+                "filename": name,
+                "document_no": doc_no,
+                "protocol_type": "OQ" if is_oq else ("PQ" if is_pq else "OPS"),
+                "size_kb": round(f.stat().st_size / 1024, 1),
+                "step_count": step_count,
+                "updated_at": time.strftime("%d-%b-%Y", time.gmtime(f.stat().st_mtime)),
+                "product_id": "onepv"
+            })
+        save_protocol_catalog(catalog)
+
+    return catalog
+
+def save_protocol_catalog(catalog: Dict[str, List[Dict[str, Any]]]):
+    try:
+        with open(CATALOG_PATH, "w", encoding="utf-8") as f:
+            json.dump(catalog, f, indent=2)
+    except Exception as e:
+        print(f"Error saving catalog: {e}")
+
+def add_protocol_to_catalog(product_id: str, item: Dict[str, Any]):
+    p_id = (product_id or "onepv").lower().strip()
+    catalog = get_protocol_catalog()
+    if p_id not in catalog:
+        catalog[p_id] = []
+    # Deduplicate by filename
+    catalog[p_id] = [p for p in catalog[p_id] if p.get("filename") != item.get("filename")]
+    catalog[p_id].insert(0, item)
+    save_protocol_catalog(catalog)
+
 @app.get("/api/project-folders")
 def get_project_folders(product_id: Optional[str] = "onepv"):
     p_id = (product_id or "onepv").lower().strip()
     product = get_product(p_id)
+    catalog = get_protocol_catalog()
+    
+    product_protocols = catalog.get(p_id, [])
 
-    oq_protocols = []
-    pq_protocols = []
-    other_protocols = []
-
-    # Map files from UPLOADS_DIR
-    for f in UPLOADS_DIR.glob("*.docx"):
-        info = {
-            "filename": f.name,
-            "size_kb": round(f.stat().st_size / 1024, 1),
-            "updated_at": time.strftime("%d-%b-%Y %H:%M", time.gmtime(f.stat().st_mtime))
-        }
-        name_upper = f.name.upper()
-        if "OQ" in name_upper or "OPERATIONAL" in name_upper:
-            info["protocol_type"] = "OQ"
-            info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
-            info["step_count"] = 15
-            oq_protocols.append(info)
-        elif "PQ" in name_upper or "PERFORMANCE" in name_upper:
-            info["protocol_type"] = "PQ"
-            info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
-            info["step_count"] = 12
-            pq_protocols.append(info)
-        else:
-            info["protocol_type"] = "OPS"
-            info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
-            info["step_count"] = 8
-            other_protocols.append(info)
-
-    # Product-specific tailoring for distinct products
-    if p_id == "signal":
-        oq_protocols = [
-            {
-                "filename": "CLIN-SIG-OQ-001 - Disproportionality Scoring (PRR_ROR).docx",
-                "size_kb": 42.5,
-                "protocol_type": "OQ",
-                "document_no": "CLIN-SIG-OQ-001",
-                "step_count": 14,
-                "updated_at": "Today"
-            },
-            {
-                "filename": "CLIN-SIG-OQ-002 - Automated Threshold Trigger & Reviewer Gating.docx",
-                "size_kb": 38.1,
-                "protocol_type": "OQ",
-                "document_no": "CLIN-SIG-OQ-002",
-                "step_count": 10,
-                "updated_at": "Yesterday"
-            }
-        ]
-        pq_protocols = [
-            {
-                "filename": "CLIN-SIG-PQ-001 - Signal Detection & Qualitative Evaluation Run.docx",
-                "size_kb": 51.2,
-                "protocol_type": "PQ",
-                "document_no": "CLIN-SIG-PQ-001",
-                "step_count": 16,
-                "updated_at": "Today"
-            }
-        ]
-        other_protocols = [
-            {
-                "filename": "SIG-OPS-2026.1 - Signal Management Smoke Suite.docx",
-                "size_kb": 29.4,
-                "protocol_type": "OPS",
-                "document_no": "SIG-OPS-2026.1",
-                "step_count": 8,
-                "updated_at": "2 days ago"
-            }
-        ]
-    elif p_id == "1pv":
-        oq_protocols = [
-            {
-                "filename": "1PV-CORE-OQ-001 - E2B(R3) Regulatory Electronic Transmission.docx",
-                "size_kb": 48.0,
-                "protocol_type": "OQ",
-                "document_no": "1PV-CORE-OQ-001",
-                "step_count": 18,
-                "updated_at": "Today"
-            },
-            {
-                "filename": "1PV-CORE-OQ-002 - Expedited Reporting & Blinded Trial Management.docx",
-                "size_kb": 44.2,
-                "protocol_type": "OQ",
-                "document_no": "1PV-CORE-OQ-002",
-                "step_count": 12,
-                "updated_at": "Yesterday"
-            }
-        ]
-        pq_protocols = [
-            {
-                "filename": "1PV-CORE-PQ-001 - Multi-Tenant Safety Database Compliance.docx",
-                "size_kb": 56.4,
-                "protocol_type": "PQ",
-                "document_no": "1PV-CORE-PQ-001",
-                "step_count": 20,
-                "updated_at": "Today"
-            }
-        ]
-        other_protocols = [
-            {
-                "filename": "1PV-OPS-2026.1 - Global Audit Trail & Sign-off Validation.docx",
-                "size_kb": 32.1,
-                "protocol_type": "OPS",
-                "document_no": "1PV-OPS-2026.1",
-                "step_count": 6,
-                "updated_at": "3 days ago"
-            }
-        ]
+    oq_protocols = [p for p in product_protocols if p.get("protocol_type") == "OQ"]
+    pq_protocols = [p for p in product_protocols if p.get("protocol_type") == "PQ"]
+    ops_protocols = [p for p in product_protocols if p.get("protocol_type") == "OPS"]
 
     folders = [
         {
             "id": f"{p_id}_oq",
-            "name": f"{product.name} — OQ Protocols",
-            "description": f"Functional Design Specification (FDS) verification & boundary test suites for {product.name}",
+            "name": "Operational Qualification (OQ)",
+            "description": f"Functional Design Specification (FDS) verification & boundary test suites",
             "type": "OQ",
             "protocols": oq_protocols
         },
         {
             "id": f"{p_id}_pq",
-            "name": f"{product.name} — PQ Protocols",
-            "description": f"User Requirement Specification (URS) clinical workflow & end-to-end qualification for {product.name}",
+            "name": "Performance Qualification (PQ)",
+            "description": f"User Requirement Specification (URS) clinical workflow & end-to-end qualification",
             "type": "PQ",
             "protocols": pq_protocols
         },
         {
             "id": f"{p_id}_ops",
-            "name": f"{product.name} — Project Ops & Regression",
-            "description": f"Release verification, regression suites, and user-authored protocols for {product.name}",
+            "name": "Release Ops & Regression",
+            "description": f"Custom user-authored suites and release regression",
             "type": "OPS",
-            "protocols": other_protocols
+            "protocols": ops_protocols
         }
     ]
-    return {"product_id": p_id, "product_name": product.name, "folders": folders}
+    return {
+        "product_id": p_id,
+        "product_name": product.name,
+        "folders": folders,
+        "total_protocols": len(product_protocols)
+    }
 
 @app.get("/api/list-sample-protocols")
 def list_sample_protocols():
@@ -297,7 +262,11 @@ def list_sample_protocols():
 def load_sample_protocol(filename: str = Form(...), product_id: Optional[str] = Form('onepv')):
     target_path = UPLOADS_DIR / filename
     if not target_path.exists():
-        raise HTTPException(status_code=404, detail="Sample protocol file not found")
+        matched = list(UPLOADS_DIR.glob(f"*_{filename}"))
+        if matched:
+            target_path = matched[0]
+        else:
+            raise HTTPException(status_code=404, detail="Sample protocol file not found")
     
     session = run_authoring_pipeline(str(target_path), filename, product_id or 'onepv')
     session_file_paths[session.session_id] = str(target_path)
@@ -312,8 +281,29 @@ async def upload_protocol(file: UploadFile = File(...), product_id: Optional[str
     with open(target_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    session = run_authoring_pipeline(str(target_path), clean_filename, product_id or 'onepv')
+    p_id = (product_id or 'onepv').lower().strip()
+    session = run_authoring_pipeline(str(target_path), clean_filename, p_id)
     session_file_paths[session.session_id] = str(target_path)
+
+    fname_upper = clean_filename.upper()
+    title_upper = (session.title or "").upper()
+    if "OQ" in fname_upper or "OQ" in title_upper or "OPERATIONAL" in fname_upper or "OPERATIONAL" in title_upper:
+        p_type = "OQ"
+    elif "PQ" in fname_upper or "PQ" in title_upper or "PERFORMANCE" in fname_upper or "PERFORMANCE" in title_upper:
+        p_type = "PQ"
+    else:
+        p_type = "OPS"
+
+    add_protocol_to_catalog(p_id, {
+        "filename": clean_filename,
+        "document_no": session.document_no or clean_filename,
+        "protocol_type": p_type,
+        "size_kb": round(target_path.stat().st_size / 1024, 1),
+        "step_count": len(session.steps),
+        "updated_at": "Just now",
+        "product_id": p_id
+    })
+
     return session.model_dump()
 
 @app.get("/api/raw-protocol/{session_id}")
