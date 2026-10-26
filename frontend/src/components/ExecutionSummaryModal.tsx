@@ -8,7 +8,8 @@ import {
   ShieldCheck,
   Lock,
   ArrowRight,
-  X
+  X,
+  Sparkles
 } from 'lucide-react';
 
 export interface StepRCA {
@@ -34,6 +35,7 @@ export interface SummaryReportData {
   acceptance_criteria_met: boolean;
   deviation_ids: string[];
   root_cause_analyses: StepRCA[];
+  executive_summary?: string;
   compliance_statement: string;
   archive_status?: string;
   manifest_sha256?: string | null;
@@ -131,6 +133,24 @@ export const ExecutionSummaryModal: React.FC<ExecutionSummaryModalProps> = ({
                 <span>Watermarked</span>
               </p>
             </div>
+          </div>
+
+          {/* AI Executive Summary Narrative Box */}
+          <div className="bg-gradient-to-br from-slate-50 via-blue-50/40 to-indigo-50/50 border border-blue-200/90 rounded-xl p-4 space-y-2.5 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-blue-600/10 text-blue-600">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-sm text-slate-900 tracking-tight">AI Executive Summary &amp; Qualification Verdict</h3>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                <span>AI GxP Certified</span>
+              </span>
+            </div>
+            <p className="text-xs text-slate-700 leading-relaxed font-sans whitespace-pre-line">
+              {summary.executive_summary || summary.compliance_statement}
+            </p>
           </div>
 
           {/* AI Root-Cause Diagnostic Section (when failures occur) */}

@@ -1,6 +1,15 @@
 {
   "onepv": [
     {
+      "filename": "CLIN-EU-VAL-OPV-1-1-OQ-036 - Manual - Registering Adverse Event Case.docx",
+      "document_no": "CLIN-EU-VAL-OPV-1-1-OQ-036",
+      "protocol_type": "OQ",
+      "size_kb": 299.6,
+      "step_count": 50,
+      "updated_at": "21-Oct-2026",
+      "product_id": "onepv"
+    },
+    {
       "filename": "CLIN-EU-PAT-OPV-1-1-PQ-022- Manual - Registering Adverse Event Case.docx",
       "document_no": "CLIN-EU-PAT-OPV-1-1-PQ-022",
       "protocol_type": "PQ",
@@ -8,36 +17,8 @@
       "step_count": 18,
       "updated_at": "Just now",
       "product_id": "onepv"
-    },
-    {
-      "filename": "CLIN-EU-PAT-OPV-1-1-PQ-022 - Performance Qualification Protocol.docx",
-      "document_no": "CLIN-EU-PAT-OPV-1-1-PQ-022",
-      "protocol_type": "PQ",
-      "size_kb": 37.8,
-      "step_count": 12,
-      "updated_at": "22-Oct-2026",
-      "product_id": "onepv"
-    },
-    {
-      "filename": "CLIN-EU-VAL-OPV-1-1-OQ-036 - Manual - Registering Adverse Event Case.docx",
-      "document_no": "CLIN-EU-VAL-OPV-1-1-OQ-036",
-      "protocol_type": "OQ",
-      "size_kb": 299.6,
-      "step_count": 15,
-      "updated_at": "21-Oct-2026",
-      "product_id": "onepv"
-    },
-    {
-      "filename": "CLIN-EU-VAL-OPV-1-1-OQ-036 - Operational Qualification Protocol.docx",
-      "document_no": "CLIN-EU-VAL-OPV-1-1-OQ-036",
-      "protocol_type": "OQ",
-      "size_kb": 38.2,
-      "step_count": 15,
-      "updated_at": "22-Oct-2026",
-      "product_id": "onepv"
     }
   ],
   "signal": [],
-  "1pv": [],
   "custom": []
 }

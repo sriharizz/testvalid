@@ -31,13 +31,13 @@ PRODUCT_REGISTRY: Dict[str, ProductConfig] = {
         login_path="/login",
         home_path="/signal/dashboard"
     ),
-    "1pv": ProductConfig(
-        product_id="1pv",
-        name="1PV Enterprise Core",
-        description="Enterprise Safety Database and Regulatory Reporting",
-        base_url="https://app.1pv.com",
-        login_path="/auth",
-        home_path="/cases"
+    "custom": ProductConfig(
+        product_id="custom",
+        name="Custom Target",
+        description="Configure custom web application or enterprise safety portal URL",
+        base_url="",
+        login_path="/login",
+        home_path="/"
     )
 }
 

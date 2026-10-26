@@ -47,7 +47,7 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const prodObj = products.find((p) => p.product_id === selectedProduct);
-  const productName = prodObj?.name || (selectedProduct === 'signal' ? 'Clinevo Signal' : selectedProduct === '1pv' ? '1PV Core' : 'Clinevo OnePV');
+  const productName = prodObj?.name || (selectedProduct === 'signal' ? 'Clinevo Signal' : selectedProduct === 'custom' ? 'Custom Target' : 'Clinevo OnePV');
 
   const shortCode = session?.document_no
     ? session.document_no.split(' - ')[0]

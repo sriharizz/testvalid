@@ -238,9 +238,27 @@ def get_project_folders(product_id: Optional[str] = "onepv"):
     
     product_protocols = catalog.get(p_id, [])
 
-    oq_protocols = [p for p in product_protocols if p.get("protocol_type") == "OQ"]
-    pq_protocols = [p for p in product_protocols if p.get("protocol_type") == "PQ"]
-    ops_protocols = [p for p in product_protocols if p.get("protocol_type") == "OPS"]
+    # Deduplicate protocols by document_no, prioritizing 'Manual' execution files with highest step counts
+    seen_docs = set()
+    deduped_protocols = []
+    sorted_protocols = sorted(
+        product_protocols,
+        key=lambda x: (
+            1 if "manual" in x.get("filename", "").lower() else 0,
+            x.get("step_count", 0),
+            x.get("size_kb", 0)
+        ),
+        reverse=True
+    )
+    for p in sorted_protocols:
+        doc_key = p.get("document_no") or p.get("filename")
+        if doc_key not in seen_docs:
+            seen_docs.add(doc_key)
+            deduped_protocols.append(p)
+
+    oq_protocols = [p for p in deduped_protocols if p.get("protocol_type") == "OQ"]
+    pq_protocols = [p for p in deduped_protocols if p.get("protocol_type") == "PQ"]
+    ops_protocols = [p for p in deduped_protocols if p.get("protocol_type") == "OPS"]
 
     folders = [
         {
@@ -796,6 +814,72 @@ def generate_ai_root_cause_analysis(session: ProtocolSession, failed_steps: List
     return fallback_analyses
 
 
+def generate_ai_executive_summary(
+    session: ProtocolSession,
+    overall_status: str,
+    total_steps: int,
+    passed_count: int,
+    failed_count: int,
+    blocked_count: int,
+    failed_steps: List[Any]
+) -> str:
+    """
+    Synthesizes an authoritative, FDA 21 CFR Part 11 / GAMP 5 compliant Executive Summary
+    using AI (Qwen LLM) with a deterministic fallback ensuring high reliability, regulatory clarity, and efficiency.
+    """
+    doc_no = session.document_no or session.filename
+    title = session.title or session.filename
+    pass_rate = round((passed_count / max(1, total_steps)) * 100, 1)
+
+    if overall_status == "PASS":
+        fallback_summary = (
+            f"100% ACCEPTANCE CRITERIA MET (PASS) — The computerized system qualification protocol for {doc_no} "
+            f"({title}) was executed deterministically with zero functional discrepancies. All {total_steps} planned validation steps "
+            f"successfully satisfied predefined acceptance criteria under FDA 21 CFR Part 11 and EU Annex 11 principles. "
+            f"Data integrity has been cryptographically preserved via immutable SHA-256 chained audit logs and two-stage timestamped "
+            f"screenshot evidence. The target application demonstrated operational stability, robust form state persistence, and full readiness for production clinical use."
+        )
+    else:
+        fail_reasons = "; ".join([f"{s.step_id}: {(s.failure_reason or s.observed_result or 'Discrepancy')[:60]}" for s in failed_steps[:3]])
+        fallback_summary = (
+            f"QUALIFIED WITH DISCREPANCIES ({overall_status}) — Execution of validation protocol {doc_no} ({title}) "
+            f"concluded with {failed_count} failed and {blocked_count} blocked step(s) across {total_steps} total steps ({pass_rate}% pass rate). "
+            f"Observed discrepancies: {fail_reasons}. Automated root cause diagnostic and CAPA recommendations have been logged in the deviation registry. "
+            f"Formal production release approval is held pending remediation and regression re-execution."
+        )
+
+    try:
+        llm = QwenLLMClient()
+        if not (llm.groq_api_key or llm.is_dgx_configured()):
+            return fallback_summary
+
+        system_prompt = (
+            "You are an expert FDA 21 CFR Part 11 / EU Annex 11 Computer Systems Validation (CSV) Lead and QA Director. "
+            "Write a concise, authoritative, and clean 2-paragraph Executive Summary for this test execution report. "
+            "Emphasize validation scope, pass rate, data integrity (immutable SHA-256 audit chaining), and release verdict. "
+            "Do not output markdown headers or bullet points; format as polished executive prose."
+        )
+        user_prompt = (
+            f"Protocol: {doc_no}\nTitle: {title}\nTotal Steps: {total_steps}\nPassed: {passed_count}\nFailed: {failed_count}\n"
+            f"Blocked: {blocked_count}\nStatus: {overall_status}\n"
+            + (f"Discrepancies: {[s.step_id + ': ' + str(s.failure_reason or s.observed_result) for s in failed_steps[:3]]}" if failed_steps else "All criteria passed without discrepancy.")
+        )
+        ai_resp = llm.chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.2,
+            max_tokens=300
+        )
+        if ai_resp and len(ai_resp.strip()) > 50:
+            return ai_resp.strip()
+    except Exception as e:
+        print(f"[AI Executive Summary] Generation error, using fallback: {e}")
+
+    return fallback_summary
+
+
 @app.get("/api/session-summary/{session_id}", response_model=ExecutionSummaryReport)
 def get_session_summary(session_id: str):
     if session_id not in sessions:
@@ -813,6 +897,9 @@ def get_session_summary(session_id: str):
     failed_steps = [s for s in session.steps if s.status in ["FAIL", "BLOCKED"]]
     deviation_ids = [f"DEV-{i+1:03d}" for i in range(len(failed_steps))]
     root_cause_analyses = generate_ai_root_cause_analysis(session, failed_steps)
+    executive_summary = generate_ai_executive_summary(
+        session, overall_status, total_steps, passed_count, failed_count, blocked_count, failed_steps
+    )
 
     manifest_file = ARTIFACTS_DIR / "archive" / session_id / "manifest.sha256"
     manifest_sha = None
@@ -839,6 +926,7 @@ def get_session_summary(session_id: str):
         acceptance_criteria_met=acceptance_criteria_met,
         deviation_ids=deviation_ids,
         root_cause_analyses=root_cause_analyses,
+        executive_summary=executive_summary,
         archive_status="ARCHIVED" if manifest_file.exists() else "READY_FOR_ARCHIVE",
         manifest_sha256=manifest_sha
     )

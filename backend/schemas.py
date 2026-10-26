@@ -313,6 +313,7 @@ class ExecutionSummaryReport(BaseModel):
     deviation_ids: List[str] = Field(default_factory=list)
     root_cause_analyses: List[StepRootCauseAnalysis] = Field(default_factory=list)
     compliance_statement: str = "Executed in accordance with 21 CFR Part 11 and EU Annex 11 computerized system validation principles."
+    executive_summary: Optional[str] = None
     archive_status: Optional[str] = "READY_FOR_ARCHIVE"
     manifest_sha256: Optional[str] = None
 

@@ -207,10 +207,9 @@ export const TargetSetupBar: React.FC<TargetSetupBarProps> = ({
                   <>
                     <option value="onepv">Clinevo OnePV</option>
                     <option value="signal">Clinevo Signal</option>
-                    <option value="1pv">1PV Enterprise Core</option>
+                    <option value="custom">Custom Target</option>
                   </>
                 )}
-                <option value="custom">Custom Application</option>
               </select>
             </div>
 

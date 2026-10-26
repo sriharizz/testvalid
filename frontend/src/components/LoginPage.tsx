@@ -17,7 +17,8 @@ import {
   Layers,
   Sparkles,
   Zap,
-  Server
+  Server,
+  Sliders
 } from 'lucide-react';
 import { SimulationMode } from '../types';
 import { ProductItem } from './TargetSetupBar';
@@ -72,7 +73,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     onProductChange(productId);
     const prod = products.find((p) => p.product_id === productId);
     if (prod) {
-      if (prod.base_url) onTargetUrlChange(prod.base_url);
+      if (prod.base_url) {
+        onTargetUrlChange(prod.base_url);
+      } else if (productId === 'custom') {
+        onTargetUrlChange('');
+        setTimeout(() => {
+          const el = document.getElementById('login-target-url-input');
+          if (el) el.focus();
+        }, 50);
+      }
       if (prod.default_credentials) {
         if (prod.default_credentials.username) onUsernameChange(prod.default_credentials.username);
         if (prod.default_credentials.password) onPasswordChange(prod.default_credentials.password);
@@ -141,6 +150,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               {products.length > 0 ? (
                 products.map((p) => {
                   const isSelected = selectedProduct === p.product_id;
+                  const isCustom = p.product_id === 'custom';
                   return (
                     <button
                       key={p.product_id}
@@ -153,11 +163,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-xs">{p.name}</span>
+                        <span className="font-bold text-xs flex items-center gap-1.5">
+                          {isCustom && <Sliders className="w-3.5 h-3.5 text-cyan-400" />}
+                          <span>{isCustom ? 'Custom Target' : p.name}</span>
+                        </span>
                         {isSelected && <CheckCircle2 className="w-4 h-4 text-cyan-400" />}
                       </div>
                       <span className="text-[11px] text-slate-400 line-clamp-2 leading-tight">
-                        {p.description || p.base_url}
+                        {isCustom ? 'Enter custom application URL or enterprise safety portal' : (p.description || p.base_url)}
                       </span>
                     </button>
                   );
@@ -268,47 +281,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </div>
           </div>
 
-          {/* 4. Execution Preferences */}
-          <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-4 flex-wrap">
-              {/* Simulation Mode */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-slate-400">Run Mode:</span>
-                <div className="inline-flex rounded-lg bg-slate-800 p-0.5 border border-slate-700">
-                  <button
-                    type="button"
-                    onClick={() => onSimModeChange('PASS')}
-                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all ${
-                      simMode === 'PASS' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Positive (PASS)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSimModeChange('FAIL')}
-                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all ${
-                      simMode === 'FAIL' ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Negative Discrepancy (FAIL)
-                  </button>
-                </div>
-              </div>
 
-              {/* Visible Browser */}
-              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-300 hover:text-white">
-                <input
-                  type="checkbox"
-                  checked={visibleBrowser}
-                  onChange={(e) => onVisibleBrowserChange(e.target.checked)}
-                  className="rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500"
-                />
-                <Laptop className="w-3.5 h-3.5 text-blue-400" />
-                <span>Launch Visible Chromium Window</span>
-              </label>
-            </div>
-          </div>
 
           {/* Action CTAs */}
           <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
