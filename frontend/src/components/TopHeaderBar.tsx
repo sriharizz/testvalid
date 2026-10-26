@@ -9,7 +9,10 @@ import {
   ChevronDown,
   CheckCircle2,
   AlertTriangle,
-  FileText
+  FileText,
+  FolderKanban,
+  KeyRound,
+  Layers
 } from 'lucide-react';
 import { ProtocolSession, SimulationMode } from '../types';
 
@@ -32,6 +35,10 @@ interface TopHeaderBarProps {
   selectedProduct?: string;
   onProductChange?: (productId: string) => void;
   products?: { product_id: string; name: string }[];
+  activeView: 'login' | 'folders' | 'workspace';
+  onViewChange: (view: 'login' | 'folders' | 'workspace') => void;
+  isFolderSidebarOpen?: boolean;
+  onToggleFolderSidebar?: () => void;
 }
 
 export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
@@ -53,6 +60,10 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
   selectedProduct: propSelectedProduct,
   onProductChange: propOnProductChange,
   products: propProducts,
+  activeView = 'workspace',
+  onViewChange,
+  isFolderSidebarOpen,
+  onToggleFolderSidebar,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -140,8 +151,69 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
         </div>
       </div>
 
+      {/* Navigation Mode Tabs */}
+      <nav className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-700/80 shadow-xs">
+        <button
+          type="button"
+          onClick={() => onViewChange('login')}
+          className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+            activeView === 'login'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+          title="Configure Target Link, Product and Login Credentials"
+        >
+          <KeyRound className="w-3.5 h-3.5 text-cyan-300" />
+          <span className="hidden md:inline">1. Target Login</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onViewChange('folders')}
+          className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+            activeView === 'folders'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+          title="Manage OQ and PQ Project Folders, Test Cases and Ops"
+        >
+          <FolderKanban className="w-3.5 h-3.5 text-amber-400" />
+          <span className="hidden md:inline">2. Project Folders</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onViewChange('workspace')}
+          className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+            activeView === 'workspace'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          }`}
+          title="Live Test Sequence and Protocol Document Inspector"
+        >
+          <Zap className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+          <span className="hidden md:inline">3. Validation Studio</span>
+        </button>
+      </nav>
+
       {/* Center: Upload & Simulation Controls */}
       <div className="flex items-center space-x-2.5">
+        {/* Toggle Folder Sidebar button in Studio */}
+        {activeView === 'workspace' && onToggleFolderSidebar && (
+          <button
+            type="button"
+            onClick={onToggleFolderSidebar}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-all cursor-pointer mr-1.5 ${
+              isFolderSidebarOpen
+                ? 'bg-slate-800 text-cyan-300 border-cyan-500/50 shadow-xs'
+                : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+            }`}
+            title="Toggle Project Folders Sidebar"
+          >
+            <FolderKanban className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden xl:inline">{isFolderSidebarOpen ? 'Hide Folders' : 'Show Folders'}</span>
+          </button>
+        )}
         {/* Author OQ/PQ Button */}
         <button
           type="button"

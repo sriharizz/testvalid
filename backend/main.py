@@ -145,6 +145,57 @@ def run_authoring_pipeline(file_path: str, filename: str, product_id: str = 'one
 def health():
     return {"status": "ok", "system": "Clinevo OnePV Validation Portal"}
 
+@app.get("/api/project-folders")
+def get_project_folders():
+    oq_protocols = []
+    pq_protocols = []
+    other_protocols = []
+
+    for f in UPLOADS_DIR.glob("*.docx"):
+        info = {
+            "filename": f.name,
+            "size_kb": round(f.stat().st_size / 1024, 1),
+            "updated_at": time.strftime("%d-%b-%Y %H:%M", time.gmtime(f.stat().st_mtime))
+        }
+        name_upper = f.name.upper()
+        if "OQ" in name_upper or "OPERATIONAL" in name_upper:
+            info["protocol_type"] = "OQ"
+            info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
+            oq_protocols.append(info)
+        elif "PQ" in name_upper or "PERFORMANCE" in name_upper:
+            info["protocol_type"] = "PQ"
+            info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
+            pq_protocols.append(info)
+        else:
+            info["protocol_type"] = "OPS"
+            info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
+            other_protocols.append(info)
+
+    folders = [
+        {
+            "id": "oq_protocols",
+            "name": "OQ Validation Protocols (Operational Qualification)",
+            "description": "Functional Design Specification (FDS) verification & boundary test suites",
+            "type": "OQ",
+            "protocols": oq_protocols
+        },
+        {
+            "id": "pq_protocols",
+            "name": "PQ Validation Protocols (Performance Qualification)",
+            "description": "User Requirement Specification (URS) clinical workflow & end-to-end qualification",
+            "type": "PQ",
+            "protocols": pq_protocols
+        },
+        {
+            "id": "release_ops",
+            "name": "Project Ops & Custom Suites",
+            "description": "Release verification, regression suites, and custom user-authored protocols",
+            "type": "OPS",
+            "protocols": other_protocols
+        }
+    ]
+    return {"folders": folders}
+
 @app.get("/api/list-sample-protocols")
 def list_sample_protocols():
     files = []

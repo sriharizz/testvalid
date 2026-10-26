@@ -9,6 +9,8 @@ import { LiveBrowserModal } from './components/LiveBrowserModal';
 import { ArtifactModal } from './components/ArtifactModal';
 import { ScreenshotLightboxModal, LightboxData } from './components/ScreenshotLightboxModal';
 import { TargetSetupBar, ProductItem } from './components/TargetSetupBar';
+import { LoginPage } from './components/LoginPage';
+import { ProjectFolderExplorer } from './components/ProjectFolderExplorer';
 
 export const App: React.FC = () => {
   // Protocol State: Strictly null on initial load (Zero hardcoded preloads)
@@ -31,6 +33,10 @@ export const App: React.FC = () => {
       overrideUrl,
     });
   };
+
+  // Navigation View State ('login' | 'folders' | 'workspace')
+  const [activeView, setActiveView] = useState<'login' | 'folders' | 'workspace'>('login');
+  const [isFolderSidebarOpen, setIsFolderSidebarOpen] = useState<boolean>(true);
 
   // Target Environment & Credentials States
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -391,52 +397,106 @@ export const App: React.FC = () => {
         selectedProduct={selectedProduct}
         onProductChange={setSelectedProduct}
         products={products}
+        activeView={activeView}
+        onViewChange={setActiveView}
+        isFolderSidebarOpen={isFolderSidebarOpen}
+        onToggleFolderSidebar={() => setIsFolderSidebarOpen(!isFolderSidebarOpen)}
       />
 
-      {/* 2. Target Environment & Credentials Setup Bar (At the beginning) */}
-      <TargetSetupBar
-        products={products}
-        selectedProduct={selectedProduct}
-        onProductChange={setSelectedProduct}
-        targetUrl={targetUrl}
-        onTargetUrlChange={setTargetUrl}
-        username={username}
-        onUsernameChange={setUsername}
-        password={password}
-        onPasswordChange={setPassword}
-        enterprise={enterprise}
-        onEnterpriseChange={setEnterprise}
-        simMode={simMode}
-        onSimModeChange={setSimMode}
-        visibleBrowser={visibleBrowser}
-        onVisibleBrowserChange={setVisibleBrowser}
-        requiresApproval={requiresApproval}
-        onRequiresApprovalChange={setRequiresApproval}
-        isExecuting={isExecuting}
-        isAuthoring={isAuthoring}
-        sessionLoaded={Boolean(session)}
-        onExecute={handleExecute}
-      />
-
-      {/* Manual Login Approval Gate Banner */}
-      {waitingForApproval && (
-        <div className="bg-amber-500 text-white px-5 py-2.5 flex items-center justify-between shadow-lg z-40 border-b border-amber-600 animate-in fade-in">
-          <div className="flex items-center gap-2.5 text-sm font-semibold">
-            <span className="text-lg">⚠️</span>
-            <span>Manual Login Approval Gate: Browser is paused on login screen. Review credentials and proceed when ready.</span>
-          </div>
-          <button
-            onClick={handleApproveLogin}
-            className="px-4 py-1.5 bg-white text-amber-900 rounded-lg font-bold text-xs shadow hover:bg-amber-50 transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <span>Approve &amp; Continue Execution</span>
-            <span>→</span>
-          </button>
-        </div>
+      {/* View 1: Initial Login Page with Product Selection & Link Upload */}
+      {activeView === 'login' && (
+        <LoginPage
+          products={products}
+          selectedProduct={selectedProduct}
+          onProductChange={setSelectedProduct}
+          targetUrl={targetUrl}
+          onTargetUrlChange={setTargetUrl}
+          username={username}
+          onUsernameChange={setUsername}
+          password={password}
+          onPasswordChange={setPassword}
+          enterprise={enterprise}
+          onEnterpriseChange={setEnterprise}
+          simMode={simMode}
+          onSimModeChange={setSimMode}
+          visibleBrowser={visibleBrowser}
+          onVisibleBrowserChange={setVisibleBrowser}
+          requiresApproval={requiresApproval}
+          onRequiresApprovalChange={setRequiresApproval}
+          onProceedToFolders={() => setActiveView('folders')}
+          onProceedToWorkspace={() => setActiveView('workspace')}
+        />
       )}
 
-      {/* 2. Main 2-Column Split-Screen Portal Layout */}
-      <main className="flex-1 flex overflow-hidden">
+      {/* View 2: Project Folders Manager (OQ & PQ docs and ops) */}
+      {activeView === 'folders' && (
+        <ProjectFolderExplorer
+          currentSession={session}
+          onSelectProtocol={(fname) => {
+            handleLoadSample(fname);
+            setActiveView('workspace');
+          }}
+          onUploadFile={handleUploadFile}
+          onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
+          onProceedToWorkspace={() => setActiveView('workspace')}
+          isSidebar={false}
+        />
+      )}
+
+      {/* View 3: Validation Studio (Left Project Folders Sidebar + Right Existing UI) */}
+      {activeView === 'workspace' && (
+        <>
+          <TargetSetupBar
+            products={products}
+            selectedProduct={selectedProduct}
+            onProductChange={setSelectedProduct}
+            targetUrl={targetUrl}
+            onTargetUrlChange={setTargetUrl}
+            username={username}
+            onUsernameChange={setUsername}
+            password={password}
+            onPasswordChange={setPassword}
+            enterprise={enterprise}
+            onEnterpriseChange={setEnterprise}
+            simMode={simMode}
+            onSimModeChange={setSimMode}
+            visibleBrowser={visibleBrowser}
+            onVisibleBrowserChange={setVisibleBrowser}
+            requiresApproval={requiresApproval}
+            onRequiresApprovalChange={setRequiresApproval}
+            isExecuting={isExecuting}
+            isAuthoring={isAuthoring}
+            sessionLoaded={Boolean(session)}
+            onExecute={handleExecute}
+          />
+
+          {waitingForApproval && (
+            <div className="bg-amber-500 text-white px-5 py-2.5 flex items-center justify-between shadow-lg z-40 border-b border-amber-600 animate-in fade-in">
+              <div className="flex items-center gap-2.5 text-sm font-semibold">
+                <span className="text-lg">⚠️</span>
+                <span>Manual Login Approval Gate: Browser is paused on login screen. Review credentials and proceed when ready.</span>
+              </div>
+              <button
+                onClick={handleApproveLogin}
+                className="px-4 py-1.5 bg-white text-amber-900 rounded-lg font-bold text-xs shadow hover:bg-amber-50 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <span>Approve & Continue Execution</span>
+                <span>→</span>
+              </button>
+            </div>
+          )}
+
+          <main className="flex-1 flex overflow-hidden">
+            {isFolderSidebarOpen && (
+              <ProjectFolderExplorer
+                currentSession={session}
+                onSelectProtocol={(fname) => handleLoadSample(fname)}
+                onUploadFile={handleUploadFile}
+                onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
+                onProceedToWorkspace={() => {}}
+                isSidebar={true}
+              />
+            )}
 
         {/* Column 2: Live Test Sequence (Connected Series) */}
         <MiddleSequencePane
@@ -460,6 +520,8 @@ export const App: React.FC = () => {
           onOpenLightbox={handleOpenLightbox}
         />
       </main>
+        </>
+      )}
 
       {/* Live Browser Modal / Drawer */}
       <LiveBrowserModal
