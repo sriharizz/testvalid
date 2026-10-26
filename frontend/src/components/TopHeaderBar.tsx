@@ -29,6 +29,9 @@ interface TopHeaderBarProps {
   onOpenSummaryModal?: () => void;
   isExecuting: boolean;
   isAuthoring?: boolean;
+  selectedProduct?: string;
+  onProductChange?: (productId: string) => void;
+  products?: { product_id: string; name: string }[];
 }
 
 export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
@@ -47,18 +50,29 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
   onOpenSummaryModal,
   isExecuting,
   isAuthoring,
+  selectedProduct: propSelectedProduct,
+  onProductChange: propOnProductChange,
+  products: propProducts,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [samples, setSamples] = useState<{ filename: string; size_kb: number }[]>([]);
-  const [products, setProducts] = useState<{ product_id: string; name: string }[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState<string>("onepv");
+  const [internalProducts, setInternalProducts] = useState<{ product_id: string; name: string }[]>([]);
+  const [internalSelectedProduct, setInternalSelectedProduct] = useState<string>("onepv");
+
+  const effectiveProducts = (propProducts && propProducts.length > 0) ? propProducts : internalProducts;
+  const effectiveProduct = propSelectedProduct || internalSelectedProduct;
+
+  const handleProductSelect = (pId: string) => {
+    if (propOnProductChange) propOnProductChange(pId);
+    setInternalSelectedProduct(pId);
+  };
 
   useEffect(() => {
     fetch('/api/products')
       .then((res) => res.json())
       .then((data) => {
-        if (data && data.products) setProducts(data.products);
+        if (data && data.products) setInternalProducts(data.products);
       })
       .catch(() => {});
   }, []);
@@ -74,7 +88,7 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      onUploadFile(e.target.files[0], selectedProduct);
+      onUploadFile(e.target.files[0], effectiveProduct);
     }
   };
 
@@ -106,14 +120,14 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
             <span className="text-slate-400 font-normal">—</span>
           </span>
           <select
-            value={selectedProduct}
-            onChange={(e) => setSelectedProduct(e.target.value)}
+            value={effectiveProduct}
+            onChange={(e) => handleProductSelect(e.target.value)}
             disabled={isAuthoring || isExecuting}
             className="bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 text-white font-semibold text-xs rounded-lg px-2.5 py-1 focus:outline-hidden focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors shadow-xs"
             title="Select target product for validation"
           >
-            {products.length > 0 ? (
-              products.map((p) => (
+            {effectiveProducts.length > 0 ? (
+              effectiveProducts.map((p) => (
                 <option key={p.product_id} value={p.product_id} className="bg-slate-900 text-white">
                   {p.name}
                 </option>
@@ -184,7 +198,7 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = ({
                     key={s.filename}
                     type="button"
                     onClick={() => {
-                      onLoadSample(s.filename, selectedProduct);
+                      onLoadSample(s.filename, effectiveProduct);
                       setDropdownOpen(false);
                     }}
                     className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-800 text-slate-200 transition-colors flex flex-col"

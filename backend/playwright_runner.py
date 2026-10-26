@@ -911,7 +911,7 @@ class PlaywrightRunner:
         base_url: str = "https://mpv-two.vercel.app",
         headless: bool = True
     ):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = re.sub(r"/login/?$", "", (base_url or "").strip().rstrip("/")) or "https://mpv-two.vercel.app"
         self.headless = headless
 
     async def run_protocol(
@@ -1067,9 +1067,9 @@ class PlaywrightRunner:
                             p_ctrl = await find_semantic_control(page, "Password", "text")
                             e_ctrl = await find_semantic_control(page, "Enterprise", "text")
 
-                            u_val = field_actions_map.get("User Name", PlannedFieldAction(field_id="", section="auth", label="", control_type="text", target_value=creds["username"])).target_value
-                            p_val = field_actions_map.get("Password", PlannedFieldAction(field_id="", section="auth", label="", control_type="text", target_value=creds["password"])).target_value
-                            e_val = field_actions_map.get("Enterprise", PlannedFieldAction(field_id="", section="auth", label="", control_type="text", target_value=creds["enterprise"])).target_value
+                            u_val = (creds.get("username") or "").strip() or field_actions_map.get("User Name", PlannedFieldAction(field_id="", section="auth", label="", control_type="text", target_value=creds["username"])).target_value
+                            p_val = (creds.get("password") or "").strip() or field_actions_map.get("Password", PlannedFieldAction(field_id="", section="auth", label="", control_type="text", target_value=creds["password"])).target_value
+                            e_val = (creds.get("enterprise") or "").strip() or field_actions_map.get("Enterprise", PlannedFieldAction(field_id="", section="auth", label="", control_type="text", target_value=creds["enterprise"])).target_value
 
                             if u_ctrl: await human_fill(page, u_ctrl, u_val, broadcast_fn=broadcast_frame, label="Username")
                             if p_ctrl: await human_fill(page, p_ctrl, p_val, broadcast_fn=broadcast_frame, label="Password")

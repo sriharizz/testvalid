@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
@@ -215,6 +216,7 @@ class ExecuteRequest(BaseModel):
     requires_approval: bool = False
     headless: bool = True
     max_steps: Optional[int] = None
+    target_url: Optional[str] = None
 
 @app.post("/api/execute/{session_id}")
 async def execute_session(
@@ -239,7 +241,7 @@ async def execute_session(
         async def worker_coro():
             product = get_product(session.product_id)
             runner = PlaywrightRunner(
-                base_url=product.base_url,
+                base_url=re.sub(r"/login/?$", "", ((req.target_url or "").strip() or product.base_url).rstrip("/")) or "https://mpv-two.vercel.app",
                 headless=req.headless
             )
             async def ws_cb(msg):

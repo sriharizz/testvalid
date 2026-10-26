@@ -85,13 +85,40 @@ export const MiddleSequencePane: React.FC<MiddleSequencePaneProps> = ({
             <ListOrdered className="w-7 h-7 stroke-[1.5]" />
           </div>
           <h3 className="text-xs font-bold text-slate-700">
-            {isAuthoring ? 'Extracting Test Steps...' : 'No Test Steps Loaded'}
+            {isAuthoring ? 'Extracting Test Steps...' : 'Validation Workflow Setup'}
           </h3>
           <p className="text-[11px] text-slate-500 max-w-[240px] mt-1 leading-relaxed">
             {isAuthoring
               ? 'Parsing tables, scenarios, and screenshot checkpoints from your document...'
-              : 'Upload your validation protocol (.docx) above to extract test sequences dynamically.'}
+              : 'Configure your target application link and credentials above, then upload or select a protocol to begin.'}
           </p>
+
+          {!isAuthoring && (
+            <div className="mt-4 p-3 bg-white border border-slate-200 rounded-xl text-left w-full max-w-[320px] shadow-xs space-y-2 text-[11px]">
+              <div className="font-semibold text-slate-700 text-xs border-b border-slate-100 pb-1 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                <span>Validation Lifecycle</span>
+              </div>
+              <div className="space-y-1.5 text-slate-600">
+                <div className="flex items-start gap-2">
+                  <span className="font-bold text-blue-600">1.</span>
+                  <span><strong>Target &amp; Login:</strong> Select product, paste link, review credentials above.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="font-bold text-blue-600">2.</span>
+                  <span><strong>Ingest Protocol:</strong> Upload .docx or select sample protocol.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="font-bold text-blue-600">3.</span>
+                  <span><strong>Automated Qualification:</strong> Run serial validation in Playwright.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="font-bold text-emerald-600">4.</span>
+                  <span><strong>Full Executive Summary:</strong> Auto-populates at completion with AI RCA and Table 6 .docx download.</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* Step Cards List */
@@ -185,6 +212,7 @@ export const MiddleSequencePane: React.FC<MiddleSequencePaneProps> = ({
                     <p className="text-[11px] text-slate-500 line-clamp-2 mt-1 leading-normal">
                       {step.procedure}
                     </p>
+
 
                     {/* Separated Evidence Screenshots Container */}
                     {(step.form_screenshot_url || step.modal_screenshot_url || step.screenshot_url) && (

@@ -1,6 +1,6 @@
 import { ExecutionSummaryModal, SummaryReportData } from './components/ExecutionSummaryModal';
 import { ProtocolAuthoringModal } from './components/ProtocolAuthoringModal';
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ProtocolSession, ProtocolStep, SimulationMode, TraceStage } from './types';
 import { TopHeaderBar } from './components/TopHeaderBar';
 import { MiddleSequencePane } from './components/MiddleSequencePane';
@@ -8,6 +8,7 @@ import { RightDocInspector } from './components/RightDocInspector';
 import { LiveBrowserModal } from './components/LiveBrowserModal';
 import { ArtifactModal } from './components/ArtifactModal';
 import { ScreenshotLightboxModal, LightboxData } from './components/ScreenshotLightboxModal';
+import { TargetSetupBar, ProductItem } from './components/TargetSetupBar';
 
 export const App: React.FC = () => {
   // Protocol State: Strictly null on initial load (Zero hardcoded preloads)
@@ -30,6 +31,27 @@ export const App: React.FC = () => {
       overrideUrl,
     });
   };
+
+  // Target Environment & Credentials States
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<string>('onepv');
+  const [targetUrl, setTargetUrl] = useState<string>('https://mpv-two.vercel.app');
+
+  // Fetch available products and synchronize initial target URL
+  useEffect(() => {
+    fetch('/api/products')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.products) {
+          setProducts(data.products);
+          const current = data.products.find((p: ProductItem) => p.product_id === selectedProduct);
+          if (current && current.base_url) {
+            setTargetUrl(current.base_url);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Credential Gate States
   const [username, setUsername] = useState<string>('sirihari.banda');
@@ -67,7 +89,7 @@ export const App: React.FC = () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // Manual Protocol Upload Handler (processes the user's uploaded Word file dynamically)
-  const handleUploadFile = async (file: File, productId: string = 'onepv') => {
+  const handleUploadFile = async (file: File, productId: string = selectedProduct) => {
     setIsAuthoring(true);
     setAuthoringStage(1); // Stage 1: Extraction running
     setSession(null);
@@ -125,7 +147,7 @@ export const App: React.FC = () => {
   };
 
   // Sample Protocol Selection (Dropdown option)
-  const handleLoadSample = async (filename: string, productId: string = 'onepv') => {
+  const handleLoadSample = async (filename: string, productId: string = selectedProduct) => {
     setIsAuthoring(true);
     setAuthoringStage(1);
     setSession(null);
@@ -232,7 +254,8 @@ export const App: React.FC = () => {
             setSession(msg.session);
           }
           // Fetch and display AI Executive Summary automatically
-          fetch(`/api/session-summary/${session?.session_id || (msg.session && msg.session.session_id)}`)
+          const targetSid = (msg.session && msg.session.session_id) || session?.session_id;
+          fetch(`/api/session-summary/${targetSid}`)
             .then((r) => r.json())
             .then((data) => {
               setSummaryData(data);
@@ -276,6 +299,7 @@ export const App: React.FC = () => {
         username,
         password,
         enterprise,
+        target_url: targetUrl,
         requires_approval: requiresApproval,
         headless: !visibleBrowser, // If visibleBrowser is toggled, launch visible Chromium window!
         max_steps: null,
@@ -364,6 +388,34 @@ export const App: React.FC = () => {
         onOpenSummaryModal={handleOpenSummary}
         isExecuting={isExecuting}
         isAuthoring={isAuthoring}
+        selectedProduct={selectedProduct}
+        onProductChange={setSelectedProduct}
+        products={products}
+      />
+
+      {/* 2. Target Environment & Credentials Setup Bar (At the beginning) */}
+      <TargetSetupBar
+        products={products}
+        selectedProduct={selectedProduct}
+        onProductChange={setSelectedProduct}
+        targetUrl={targetUrl}
+        onTargetUrlChange={setTargetUrl}
+        username={username}
+        onUsernameChange={setUsername}
+        password={password}
+        onPasswordChange={setPassword}
+        enterprise={enterprise}
+        onEnterpriseChange={setEnterprise}
+        simMode={simMode}
+        onSimModeChange={setSimMode}
+        visibleBrowser={visibleBrowser}
+        onVisibleBrowserChange={setVisibleBrowser}
+        requiresApproval={requiresApproval}
+        onRequiresApprovalChange={setRequiresApproval}
+        isExecuting={isExecuting}
+        isAuthoring={isAuthoring}
+        sessionLoaded={Boolean(session)}
+        onExecute={handleExecute}
       />
 
       {/* Manual Login Approval Gate Banner */}
