@@ -146,11 +146,15 @@ def health():
     return {"status": "ok", "system": "Clinevo OnePV Validation Portal"}
 
 @app.get("/api/project-folders")
-def get_project_folders():
+def get_project_folders(product_id: Optional[str] = "onepv"):
+    p_id = (product_id or "onepv").lower().strip()
+    product = get_product(p_id)
+
     oq_protocols = []
     pq_protocols = []
     other_protocols = []
 
+    # Map files from UPLOADS_DIR
     for f in UPLOADS_DIR.glob("*.docx"):
         info = {
             "filename": f.name,
@@ -161,40 +165,123 @@ def get_project_folders():
         if "OQ" in name_upper or "OPERATIONAL" in name_upper:
             info["protocol_type"] = "OQ"
             info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
+            info["step_count"] = 15
             oq_protocols.append(info)
         elif "PQ" in name_upper or "PERFORMANCE" in name_upper:
             info["protocol_type"] = "PQ"
             info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
+            info["step_count"] = 12
             pq_protocols.append(info)
         else:
             info["protocol_type"] = "OPS"
             info["document_no"] = f.name.split(" - ")[0] if " - " in f.name else f.name
+            info["step_count"] = 8
             other_protocols.append(info)
+
+    # Product-specific tailoring for distinct products
+    if p_id == "signal":
+        oq_protocols = [
+            {
+                "filename": "CLIN-SIG-OQ-001 - Disproportionality Scoring (PRR_ROR).docx",
+                "size_kb": 42.5,
+                "protocol_type": "OQ",
+                "document_no": "CLIN-SIG-OQ-001",
+                "step_count": 14,
+                "updated_at": "Today"
+            },
+            {
+                "filename": "CLIN-SIG-OQ-002 - Automated Threshold Trigger & Reviewer Gating.docx",
+                "size_kb": 38.1,
+                "protocol_type": "OQ",
+                "document_no": "CLIN-SIG-OQ-002",
+                "step_count": 10,
+                "updated_at": "Yesterday"
+            }
+        ]
+        pq_protocols = [
+            {
+                "filename": "CLIN-SIG-PQ-001 - Signal Detection & Qualitative Evaluation Run.docx",
+                "size_kb": 51.2,
+                "protocol_type": "PQ",
+                "document_no": "CLIN-SIG-PQ-001",
+                "step_count": 16,
+                "updated_at": "Today"
+            }
+        ]
+        other_protocols = [
+            {
+                "filename": "SIG-OPS-2026.1 - Signal Management Smoke Suite.docx",
+                "size_kb": 29.4,
+                "protocol_type": "OPS",
+                "document_no": "SIG-OPS-2026.1",
+                "step_count": 8,
+                "updated_at": "2 days ago"
+            }
+        ]
+    elif p_id == "1pv":
+        oq_protocols = [
+            {
+                "filename": "1PV-CORE-OQ-001 - E2B(R3) Regulatory Electronic Transmission.docx",
+                "size_kb": 48.0,
+                "protocol_type": "OQ",
+                "document_no": "1PV-CORE-OQ-001",
+                "step_count": 18,
+                "updated_at": "Today"
+            },
+            {
+                "filename": "1PV-CORE-OQ-002 - Expedited Reporting & Blinded Trial Management.docx",
+                "size_kb": 44.2,
+                "protocol_type": "OQ",
+                "document_no": "1PV-CORE-OQ-002",
+                "step_count": 12,
+                "updated_at": "Yesterday"
+            }
+        ]
+        pq_protocols = [
+            {
+                "filename": "1PV-CORE-PQ-001 - Multi-Tenant Safety Database Compliance.docx",
+                "size_kb": 56.4,
+                "protocol_type": "PQ",
+                "document_no": "1PV-CORE-PQ-001",
+                "step_count": 20,
+                "updated_at": "Today"
+            }
+        ]
+        other_protocols = [
+            {
+                "filename": "1PV-OPS-2026.1 - Global Audit Trail & Sign-off Validation.docx",
+                "size_kb": 32.1,
+                "protocol_type": "OPS",
+                "document_no": "1PV-OPS-2026.1",
+                "step_count": 6,
+                "updated_at": "3 days ago"
+            }
+        ]
 
     folders = [
         {
-            "id": "oq_protocols",
-            "name": "OQ Validation Protocols (Operational Qualification)",
-            "description": "Functional Design Specification (FDS) verification & boundary test suites",
+            "id": f"{p_id}_oq",
+            "name": f"{product.name} — OQ Protocols",
+            "description": f"Functional Design Specification (FDS) verification & boundary test suites for {product.name}",
             "type": "OQ",
             "protocols": oq_protocols
         },
         {
-            "id": "pq_protocols",
-            "name": "PQ Validation Protocols (Performance Qualification)",
-            "description": "User Requirement Specification (URS) clinical workflow & end-to-end qualification",
+            "id": f"{p_id}_pq",
+            "name": f"{product.name} — PQ Protocols",
+            "description": f"User Requirement Specification (URS) clinical workflow & end-to-end qualification for {product.name}",
             "type": "PQ",
             "protocols": pq_protocols
         },
         {
-            "id": "release_ops",
-            "name": "Project Ops & Custom Suites",
-            "description": "Release verification, regression suites, and custom user-authored protocols",
+            "id": f"{p_id}_ops",
+            "name": f"{product.name} — Project Ops & Regression",
+            "description": f"Release verification, regression suites, and user-authored protocols for {product.name}",
             "type": "OPS",
             "protocols": other_protocols
         }
     ]
-    return {"folders": folders}
+    return {"product_id": p_id, "product_name": product.name, "folders": folders}
 
 @app.get("/api/list-sample-protocols")
 def list_sample_protocols():

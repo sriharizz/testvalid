@@ -34,9 +34,8 @@ export const App: React.FC = () => {
     });
   };
 
-  // Navigation View State ('login' | 'folders' | 'workspace')
-  const [activeView, setActiveView] = useState<'login' | 'folders' | 'workspace'>('login');
-  const [isFolderSidebarOpen, setIsFolderSidebarOpen] = useState<boolean>(true);
+  // Authentication & Session State
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
 
   // Target Environment & Credentials States
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -377,34 +376,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 text-slate-800 font-sans select-none overflow-hidden">
-      {/* 1. Full-Width Top Header Bar */}
-      <TopHeaderBar
-        session={session}
-        simMode={simMode}
-        onSimModeChange={setSimMode}
-        visibleBrowser={visibleBrowser}
-        onVisibleBrowserChange={setVisibleBrowser}
-        onUploadFile={handleUploadFile}
-        onLoadSample={handleLoadSample}
-        onExecute={handleExecute}
-        onOpenLiveBrowser={() => setIsLiveBrowserOpen(true)}
-        onDownloadDocx={handleDownloadDocx}
-        onDownloadEvidence={handleDownloadEvidence}
-        onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
-        onOpenSummaryModal={handleOpenSummary}
-        isExecuting={isExecuting}
-        isAuthoring={isAuthoring}
-        selectedProduct={selectedProduct}
-        onProductChange={setSelectedProduct}
-        products={products}
-        activeView={activeView}
-        onViewChange={setActiveView}
-        isFolderSidebarOpen={isFolderSidebarOpen}
-        onToggleFolderSidebar={() => setIsFolderSidebarOpen(!isFolderSidebarOpen)}
-      />
-
-      {/* View 1: Initial Login Page with Product Selection & Link Upload */}
-      {activeView === 'login' && (
+      {!isLoggedIn ? (
         <LoginPage
           products={products}
           selectedProduct={selectedProduct}
@@ -423,53 +395,28 @@ export const App: React.FC = () => {
           onVisibleBrowserChange={setVisibleBrowser}
           requiresApproval={requiresApproval}
           onRequiresApprovalChange={setRequiresApproval}
-          onProceedToFolders={() => setActiveView('folders')}
-          onProceedToWorkspace={() => setActiveView('workspace')}
+          onProceedToFolders={() => setIsLoggedIn(true)}
+          onProceedToWorkspace={() => setIsLoggedIn(true)}
         />
-      )}
-
-      {/* View 2: Project Folders Manager (OQ & PQ docs and ops) */}
-      {activeView === 'folders' && (
-        <ProjectFolderExplorer
-          currentSession={session}
-          onSelectProtocol={(fname) => {
-            handleLoadSample(fname);
-            setActiveView('workspace');
-          }}
-          onUploadFile={handleUploadFile}
-          onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
-          onProceedToWorkspace={() => setActiveView('workspace')}
-          isSidebar={false}
-        />
-      )}
-
-      {/* View 3: Validation Studio (Left Project Folders Sidebar + Right Existing UI) */}
-      {activeView === 'workspace' && (
+      ) : (
         <>
-          <TargetSetupBar
-            products={products}
+          {/* 1. Sleek, Minimalist Top Header Bar (Zero Button Clutter) */}
+          <TopHeaderBar
+            session={session}
             selectedProduct={selectedProduct}
-            onProductChange={setSelectedProduct}
+            products={products}
             targetUrl={targetUrl}
-            onTargetUrlChange={setTargetUrl}
             username={username}
-            onUsernameChange={setUsername}
-            password={password}
-            onPasswordChange={setPassword}
-            enterprise={enterprise}
-            onEnterpriseChange={setEnterprise}
-            simMode={simMode}
-            onSimModeChange={setSimMode}
-            visibleBrowser={visibleBrowser}
-            onVisibleBrowserChange={setVisibleBrowser}
-            requiresApproval={requiresApproval}
-            onRequiresApprovalChange={setRequiresApproval}
             isExecuting={isExecuting}
-            isAuthoring={isAuthoring}
-            sessionLoaded={Boolean(session)}
             onExecute={handleExecute}
+            onOpenLiveBrowser={() => setIsLiveBrowserOpen(true)}
+            onDownloadDocx={handleDownloadDocx}
+            onDownloadEvidence={handleDownloadEvidence}
+            onOpenSummaryModal={handleOpenSummary}
+            onLogout={() => setIsLoggedIn(false)}
           />
 
+          {/* Manual Login Approval Gate Banner */}
           {waitingForApproval && (
             <div className="bg-amber-500 text-white px-5 py-2.5 flex items-center justify-between shadow-lg z-40 border-b border-amber-600 animate-in fade-in">
               <div className="flex items-center gap-2.5 text-sm font-semibold">
@@ -480,46 +427,50 @@ export const App: React.FC = () => {
                 onClick={handleApproveLogin}
                 className="px-4 py-1.5 bg-white text-amber-900 rounded-lg font-bold text-xs shadow hover:bg-amber-50 transition-all cursor-pointer flex items-center gap-1.5"
               >
-                <span>Approve & Continue Execution</span>
+                <span>Approve &amp; Continue Execution</span>
                 <span>→</span>
               </button>
             </div>
           )}
 
+          {/* 2. Main 3-Column Portal Layout */}
           <main className="flex-1 flex overflow-hidden">
-            {isFolderSidebarOpen && (
-              <ProjectFolderExplorer
-                currentSession={session}
-                onSelectProtocol={(fname) => handleLoadSample(fname)}
-                onUploadFile={handleUploadFile}
-                onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
-                onProceedToWorkspace={() => {}}
-                isSidebar={true}
-              />
-            )}
+            {/* Left Sidebar: Project Folders Management tailored to selected product */}
+            <ProjectFolderExplorer
+              selectedProduct={selectedProduct}
+              products={products}
+              targetUrl={targetUrl}
+              username={username}
+              currentSession={session}
+              onSelectProtocol={(fname) => handleLoadSample(fname, selectedProduct)}
+              onUploadFile={(file) => handleUploadFile(file, selectedProduct)}
+              onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
+              onLogout={() => setIsLoggedIn(false)}
+              isSidebar={true}
+            />
 
-        {/* Column 2: Live Test Sequence (Connected Series) */}
-        <MiddleSequencePane
-          steps={session?.steps || []}
-          selectedStepId={selectedStepId}
-          onSelectStep={(stepId) => setSelectedStepId(stepId)}
-          documentShortCode={shortCode}
-          isAuthoring={isAuthoring}
-          onExecute={handleExecute}
-          isExecuting={isExecuting}
-          onOpenLightbox={handleOpenLightbox}
-        />
+            {/* Column 2: Live Test Sequence (Connected Series) */}
+            <MiddleSequencePane
+              steps={session?.steps || []}
+              selectedStepId={selectedStepId}
+              onSelectStep={(stepId) => setSelectedStepId(stepId)}
+              documentShortCode={shortCode}
+              isAuthoring={isAuthoring}
+              onExecute={handleExecute}
+              isExecuting={isExecuting}
+              onOpenLightbox={handleOpenLightbox}
+            />
 
-        {/* Column 3: Active Protocol Document Inspector */}
-        <RightDocInspector
-          session={session}
-          rawDocxBuffer={rawDocxBuffer}
-          selectedStepId={selectedStepId}
-          onSelectStep={(stepId) => setSelectedStepId(stepId)}
-          isExecuting={isExecuting}
-          onOpenLightbox={handleOpenLightbox}
-        />
-      </main>
+            {/* Column 3: Active Protocol Document Inspector */}
+            <RightDocInspector
+              session={session}
+              rawDocxBuffer={rawDocxBuffer}
+              selectedStepId={selectedStepId}
+              onSelectStep={(stepId) => setSelectedStepId(stepId)}
+              isExecuting={isExecuting}
+              onOpenLightbox={handleOpenLightbox}
+            />
+          </main>
         </>
       )}
 

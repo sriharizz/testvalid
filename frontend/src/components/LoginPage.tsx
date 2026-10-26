@@ -320,22 +320,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <div className="flex items-center gap-2.5 w-full sm:w-auto">
               <button
                 type="button"
-                onClick={onProceedToFolders}
-                className="flex-1 sm:flex-initial px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 shadow transition-all cursor-pointer"
-              >
-                <FolderKanban className="w-4 h-4 text-amber-400" />
-                <span>Open Project Folders (OQ / PQ)</span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-              </button>
-
-              <button
-                type="button"
                 onClick={onProceedToWorkspace}
-                className="flex-1 sm:flex-initial px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+                className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
               >
                 <Zap className="w-4 h-4 fill-amber-300 text-amber-300" />
-                <span>Enter Validation Studio</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <span>Log In &amp; Launch Validation Workspace</span>
+                <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
