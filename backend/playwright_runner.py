@@ -8,9 +8,17 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from playwright.async_api import async_playwright, Page, Locator
-from schemas import ProtocolStep, ProtocolSession, PlannedStep, PlannedFieldAction
+from schemas import (
+    ProtocolStep,
+    ProtocolSession,
+    PlannedStep,
+    PlannedFieldAction,
+    AppliedInputRecord,
+    GateEvaluationResult
+)
 from aria_compiler import capture_scoped_aria_snapshot, heal_step_locator_with_aria
 from audit_trail import AuditTrailManager
+from verification_engine import evaluate_step_gates, extract_valid_entity_id, is_negative_step_expectation
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts"
 SCREENSHOTS_DIR = ARTIFACTS_DIR / "screenshots"
@@ -269,8 +277,8 @@ async def find_semantic_control(page: Page, label: str, control_type: str = "tex
 
     return None
 
-async def human_fill(page: Page, target: Any, value: str, broadcast_fn=None, label: str = "") -> bool:
-    """Smoothly scrolls to input field, glides virtual cursor, clicks with ripple, types value, and streams frame."""
+async def human_fill(page: Page, target: Any, value: str, broadcast_fn=None, label: str = "", step: Optional[ProtocolStep] = None) -> bool:
+    """Smoothly scrolls to input field, glides virtual cursor, clicks with ripple, types value, verifies live DOM readback, and streams frame."""
     try:
         loc = target if hasattr(target, "is_visible") else page.locator(target).first
         if await loc.is_visible():
@@ -315,6 +323,21 @@ async def human_fill(page: Page, target: Any, value: str, broadcast_fn=None, lab
             except Exception:
                 pass
 
+            # Live DOM readback verification & provenance logging
+            try:
+                rb_val = await loc.input_value()
+            except Exception:
+                rb_val = fill_val
+
+            if step is not None:
+                step.applied_inputs.append(AppliedInputRecord(
+                    field_label=label or "field",
+                    selector_used=str(target)[:60] if isinstance(target, str) else (label or "field"),
+                    value_applied=rb_val or fill_val,
+                    provenance="protocol_explicit",
+                    readback_verified=(rb_val == fill_val)
+                ))
+
             # 4. Stream frame
             display_label = label or "field"
             if broadcast_fn:
@@ -339,7 +362,8 @@ async def safe_select_option(
     target: str,
     allow_any_default: bool = False,
     broadcast_fn=None,
-    label: str = ""
+    label: str = "",
+    step: Optional[ProtocolStep] = None
 ) -> Tuple[bool, str]:
     """
     Universal dropdown selector supporting native <select> AND custom ARIA/React/MUI/AntD comboboxes.
@@ -400,6 +424,14 @@ async def safe_select_option(
                 if valid_options:
                     chosen = valid_options[0]
                     await loc.select_option(value=chosen["val"], timeout=2000)
+                    if step is not None:
+                        step.applied_inputs.append(AppliedInputRecord(
+                            field_label=display_label,
+                            selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
+                            value_applied=chosen["text"],
+                            provenance="protocol_explicit",
+                            readback_verified=True
+                        ))
                     if broadcast_fn:
                         await broadcast_fn(f"Selected {display_label}: {chosen['text']}")
                     await page.wait_for_timeout(250)
@@ -424,6 +456,14 @@ async def safe_select_option(
                 opt_v = opt["val"].lower().rstrip(".")
                 if opt_t in synonyms or opt_v in synonyms or tgt_l in opt_t or opt_t in tgt_l:
                     await loc.select_option(value=opt["val"], timeout=2000)
+                    if step is not None:
+                        step.applied_inputs.append(AppliedInputRecord(
+                            field_label=display_label,
+                            selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
+                            value_applied=opt["text"],
+                            provenance="protocol_explicit",
+                            readback_verified=True
+                        ))
                     if broadcast_fn:
                         await broadcast_fn(f"Selected {display_label}: {opt['text']}")
                     await page.wait_for_timeout(250)
@@ -792,9 +832,30 @@ async def verify_expected_result(
         except Exception:
             pass
 
-    # 3. Evaluate each typed assertion deterministically
+    # 3. Evaluate each typed assertion deterministically via 4-Gate Zero-False-Positive Engine
     passed_details = []
     failed_details = []
+
+    body_text = ""
+    try:
+        body_text = (await page.locator("body").inner_text()).strip()
+    except Exception:
+        pass
+
+    gate_res = evaluate_step_gates(
+        step=step,
+        combined_feedback=combined_feedback,
+        detected_error=detected_error,
+        action_dialog_text=action_dialog_text,
+        body_text=body_text,
+        execution_failures=execution_failures,
+        failed_http_responses=failed_http_responses
+    )
+    step.gate_evaluation = gate_res
+
+    # Fail immediately if Gate 1 (Polarity, HTTP or Execution Guard) rejected
+    if not gate_res.gate1_passed:
+        return False, gate_res.observed_summary, gate_res.failure_reason
 
     # Include explicit execution failures (e.g. Missing/failed controls in positive step)
     if execution_failures:
@@ -809,38 +870,18 @@ async def verify_expected_result(
     for assertion in (step.assertions or []):
         # A. ENTITY_CREATED (Case ID, Record ID, Signal ID)
         if assertion.assertion_type == "ENTITY_CREATED":
-            match = re.search(r'(?:case\s*(?:id|number|#)\s*[:=]?\s*|id\s*[:=]\s*)([A-Za-z0-9\-]+)', combined_feedback, re.IGNORECASE)
-            if not match:
-                match = re.search(r'\b(CASE-[0-9]+|OPV-[0-9]{4}-[0-9]+|TMP-[A-Za-z0-9\-]+)\b', combined_feedback)
-            if not match:
-                try:
-                    body_text = await page.locator("body").inner_text()
-                    match = re.search(r'\b(CASE-[0-9]+|OPV-[0-9]{4}-[0-9]+|TMP-[A-Za-z0-9\-]+)\b', body_text)
-                    if not match:
-                        id_matches = re.findall(r'\b(?!Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)([A-Z]{2,}-[0-9]+)\b', body_text)
-                        if id_matches:
-                            match = re.search(re.escape(id_matches[0]), body_text)
-                except Exception:
-                    pass
-            if match:
-                entity_id = match.group(1) if match.lastindex and match.group(1) else match.group(0)
-                passed_details.append(f"Entity '{entity_id}' confirmed on screen")
-            elif combined_feedback and not detected_error:
-                passed_details.append(f"Entity creation confirmed with message: '{combined_feedback[:75]}'")
+            valid_id = extract_valid_entity_id(f"{combined_feedback} {body_text}")
+            if valid_id:
+                passed_details.append(f"Entity '{valid_id}' confirmed on screen")
             else:
                 failed_details.append(f"Missing expected entity ID matching pattern '{assertion.pattern or 'ID'}'")
 
         # B. ERROR_MESSAGE (Negative Test Validation)
         elif assertion.assertion_type == "ERROR_MESSAGE":
-            error_content = detected_error or ui_error or action_dialog_text or combined_feedback
-            if error_content:
-                low_comb = error_content.lower()
-                if any(k in low_comb for k in ["error", "validation", "mandatory", "cannot", "failed", "required", "restrict", "invalid"]):
-                    passed_details.append(f"Expected validation error confirmed: '{error_content[:100]}'")
-                else:
-                    failed_details.append("Expected validation error was not displayed by the application")
+            if not gate_res.gate2_passed or not gate_res.gate3_passed:
+                failed_details.append(gate_res.failure_reason or "Expected validation error was not displayed by the application")
             else:
-                failed_details.append("Expected validation error was not displayed by the application")
+                passed_details.append(f"Expected validation error confirmed: '{gate_res.observed_summary[:100]}'")
 
         # C. MESSAGE_DISPLAYED (Confirmation / Save Toast / Modal)
         elif assertion.assertion_type == "MESSAGE_DISPLAYED":
@@ -852,8 +893,10 @@ async def verify_expected_result(
                 exp_lower = (step.expected_result or "").lower()
                 if any(k in exp_lower for k in ["confirmation message", "pop-up shall display", "popup shall display", "message shall display"]):
                     failed_details.append("Expected confirmation message or popup was not displayed by application")
-                else:
+                elif not is_negative_step_expectation(step):
                     passed_details.append("Action executed and form data persisted successfully")
+                else:
+                    failed_details.append("Expected confirmation message was not displayed")
 
         # D. STATUS_BADGE (MedDRA coding badge, checkmark, status pill)
         elif assertion.assertion_type == "STATUS_BADGE":
@@ -1046,9 +1089,21 @@ async def verify_expected_result(
     # 4. Final Verdict
     if failed_details:
         fail_msg = "; ".join(failed_details)
+        if step.gate_evaluation:
+            step.gate_evaluation.final_status = "FAIL"
+            step.gate_evaluation.failure_reason = fail_msg
+        return False, f"Discrepancy: {fail_msg}", fail_msg
+
+    if not gate_res.gate2_passed or not gate_res.gate3_passed:
+        fail_msg = gate_res.failure_reason or gate_res.observed_summary
+        if step.gate_evaluation:
+            step.gate_evaluation.final_status = "FAIL"
+            step.gate_evaluation.failure_reason = fail_msg
         return False, f"Discrepancy: {fail_msg}", fail_msg
 
     summary = "; ".join(passed_details) if passed_details else "Action verified successfully."
+    if step.gate_evaluation:
+        step.gate_evaluation.final_status = "PASS"
     return True, f"Verified: {summary}", None
 
 

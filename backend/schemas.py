@@ -229,14 +229,14 @@ class ApproveReviewRequest(BaseModel):
 class ProtocolStep(BaseModel):
     step_id: str                         # e.g., "TS1-S01" .. "TS1-S18"
     test_set_no: int = 1
-    step_number_display: str             # e.g., "1", "2" .. "18"
-    table_index: int
-    row_index: int
-    scenario: str
-    procedure: str
-    expected_result: str
-    action_intent: str
-    primary_section: SectionType
+    step_number_display: str = "1"       # e.g., "1", "2" .. "18"
+    table_index: int = 2
+    row_index: int = 1
+    scenario: str = ""
+    procedure: str = ""
+    expected_result: str = ""
+    action_intent: str = "FORM_ENTRY"
+    primary_section: SectionType = "general"
     extracted_fields: List[ExtractedFieldSpec] = Field(default_factory=list)
     assertions: List[StepAssertion] = Field(default_factory=list)
     sub_actions: List[SubActionSpec] = Field(default_factory=list)
