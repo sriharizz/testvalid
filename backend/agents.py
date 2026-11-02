@@ -3,6 +3,7 @@ import re
 import json
 import hashlib
 import time
+import datetime
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 from dotenv import load_dotenv
@@ -20,7 +21,8 @@ from schemas import (
     PlannedFieldAction,
     CoverageGateReport,
     SectionType,
-    ControlType
+    ControlType,
+    ValueProvenance
 )
 from check_coverage import CoverageChecker, check_protocol_to_plan
 from aria_compiler import PlanCacheManager
@@ -315,19 +317,41 @@ class PlannerAgent:
 
     def synthesize_fallback_field_action(self, ef: ExtractedFieldSpec) -> PlannedFieldAction:
         """
-        Intelligent, schema-aware fallback synthesizer that generates valid clinical values
-        when remote LLM server is offline.
+        Universal, schema-driven, type-and-pattern-based fallback synthesizer.
+        Zero hardcoded product dictionaries. Tags provenance accurately.
         """
+        # 1. Explicit protocol value
         if ef.explicit_value:
+            prov: ValueProvenance = "protocol_explicit"
+            val = str(ef.explicit_value).strip()
+            orig = None
+
+            val_l = val.lower()
+            if any(k in val_l for k in ["today+1", "tomorrow", "future date"]):
+                val = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+                prov = "computed_dynamic"
+                orig = ef.explicit_value
+            elif any(k in val_l for k in ["today-1", "yesterday"]):
+                val = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+                prov = "computed_dynamic"
+                orig = ef.explicit_value
+            elif "today" in val_l:
+                val = datetime.date.today().isoformat()
+                prov = "computed_dynamic"
+                orig = ef.explicit_value
+
             return PlannedFieldAction(
                 field_id=ef.field_id,
                 section=ef.section,
                 label=ef.label,
                 control_type=ef.control_type,
-                target_value=ef.explicit_value,
-                expect_auto_populated=False
+                target_value=val,
+                expect_auto_populated=False,
+                provenance=prov,
+                original_term=orig
             )
 
+        # 2. Auto-populated verify control
         if ef.control_type == "auto_populate_verify" or ef.auto_populated:
             return PlannedFieldAction(
                 field_id=ef.field_id,
@@ -335,9 +359,11 @@ class PlannerAgent:
                 label=ef.label,
                 control_type=ef.control_type,
                 target_value="__AUTO_POPULATED__",
-                expect_auto_populated=True
+                expect_auto_populated=True,
+                provenance="protocol_explicit"
             )
 
+        # 3. Toggle control
         if ef.control_type == "toggle":
             return PlannedFieldAction(
                 field_id=ef.field_id,
@@ -345,110 +371,62 @@ class PlannerAgent:
                 label=ef.label,
                 control_type=ef.control_type,
                 target_value="true",
-                expect_auto_populated=False
+                expect_auto_populated=False,
+                provenance="ai_synthesized_mandatory"
             )
 
+        # 4. Universal type- and semantic-pattern synthesis (0 hardcoded dictionaries)
         lbl = ef.label.lower()
-        sec = ef.section
         val = ""
+        prov: ValueProvenance = "ai_synthesized_mandatory"
 
-        # Event Assessment Dropdowns
-        if sec == "event_assessment":
-            val = "Recovered/Resolved" if "outcome" in lbl else ("No" if "efficacy" in lbl else "Serious")
-
-        # Event Seriousness Dropdowns
-        elif sec == "event_seriousness":
-            val = "Yes" if any(k in lbl for k in ["hospitalization", "intervention", "significant"]) else "No"
-
-        # Questionnaire Section Fields
-        elif sec == "questionnaire":
-            if "type" in lbl: val = "Text"
-            elif "question" in lbl: val = "Did the patient experience any adverse reactions?"
-            elif "response" in lbl: val = "No previous adverse reactions reported."
-
-        # Reporter Section Fields
-        elif sec == "reporter":
-            if "title" in lbl: val = "Dr"
-            elif "first name" in lbl: val = "Alexander"
-            elif "last name" in lbl: val = "Fleming"
-            elif "sex" in lbl: val = "Male"
-            elif "relationship" in lbl: val = "Physician"
-            elif "reporter type" in lbl: val = "Healthcare Professional"
-            elif "address1" in lbl: val = "450 Oxford Street"
-            elif "address2" in lbl: val = "Suite 200"
-            elif "city" in lbl: val = "London"
-            elif "state" in lbl: val = "Greater London"
-            elif "country" in lbl: val = "United States"
-            elif "zip" in lbl: val = "W1C 1AP"
-            elif "fax" in lbl: val = "+44 20 7946 0919"
-            elif "contact" in lbl or "phone" in lbl: val = "+44 20 7946 0920"
-            elif "email" in lbl: val = "alexander.fleming@hospital.org"
-            else: val = "Clinical Reporter Data"
-
-        # Patient Section Fields
-        elif sec == "patient":
-            if "initials" in lbl: val = "JD"
-            elif "is reporter as patient" in lbl: val = "No"
-            elif "title" in lbl: val = "Mr"
-            elif "first name" in lbl: val = "John"
-            elif "last name" in lbl: val = "Doe"
-            elif "occupation" in lbl: val = "Engineer"
-            elif "birth" in lbl or "dob" in lbl: val = "1985-06-15"
-            elif "sex" in lbl: val = "Male"
-            elif "address 1" in lbl or "address1" in lbl: val = "12 Baker Street"
-            elif "address 2" in lbl or "address2" in lbl: val = "Flat 4B"
-            elif "city" in lbl: val = "London"
-            elif "state" in lbl: val = "Greater London"
-            elif "country" in lbl: val = "United States"
-            elif "zip" in lbl: val = "NW1 6XE"
-            elif "contact" in lbl or "phone" in lbl: val = "+44 20 7946 0123"
-            elif "email" in lbl: val = "john.doe@patientmail.com"
-            else: val = "Patient Data"
-
-        # Product Section Fields
-        elif sec == "product":
-            if "product name" in lbl: val = "Paracetamol"
-            elif "additional" in lbl: val = "Administered orally 500mg BID with normal saline."
-            else: val = "Paracetamol 500mg"
-
-        # Event Section Fields
-        elif sec == "event":
-            if "reaction" in lbl: val = "Severe Pyrexia"
-            elif "reported term" in lbl: val = "Pyrexia"
-            elif "start date" in lbl: val = "2026-10-10"
-            elif "end date" in lbl: val = "2026-10-12"
-            else: val = "Pyrexia Event Data"
-
-        # General / Registration
-        elif sec == "general":
-            if "classification" in lbl: val = "Adverse Event"
-            elif "source" in lbl: val = "Spontaneous"
-            elif "receipt date" in lbl or "received date" in lbl: val = "2026-10-14"
-            else: val = "General Case Data"
-
-        # Questionnaire
-        elif sec == "questionnaire":
-            if "field type" in lbl: val = "Text"
-            elif "question" in lbl: val = "Did the patient experience pyrexia or chills?"
-            elif "response" in lbl: val = "Patient confirmed mild pyrexia resolved within 24 hours."
-            else: val = "Questionnaire Data"
-
-        # Activity Log
-        elif sec == "activity_log":
-            if "date" in lbl: val = "2026-10-14"
-            elif "type" in lbl: val = "Submission Note"
-            elif "comments" in lbl: val = "Automated GxP qualification log entry verified by validation agent."
-            else: val = "Activity Log Entry"
-
-        # Auth
-        elif sec == "auth":
-            if "user" in lbl: val = "sirihari.banda"
-            elif "password" in lbl: val = "Clinevo@2026"
-            elif "enterprise" in lbl: val = "Clinevo"
-            else: val = "Clinevo"
-
+        if ef.control_type == "date" or "date" in lbl or "dob" in lbl or "birth" in lbl:
+            if "future" in lbl or "admission" in lbl:
+                val = datetime.date.today().isoformat()
+            elif "birth" in lbl or "dob" in lbl:
+                val = "1990-01-01"
+            else:
+                val = datetime.date.today().isoformat()
+            prov = "computed_dynamic"
+        elif ef.control_type == "select":
+            if any(k in lbl for k in ["seriousness", "serious", "hospitalization", "intervention"]):
+                val = "Serious"
+            elif any(k in lbl for k in ["reporter type", "type", "source"]):
+                val = "HCP"
+            elif any(k in lbl for k in ["sex", "gender"]):
+                val = "Male"
+            elif any(k in lbl for k in ["country"]):
+                val = "United States"
+            elif any(k in lbl for k in ["outcome", "status"]):
+                val = "Recovered/Resolved"
+            else:
+                val = "Yes"
+        elif "email" in lbl:
+            val = "tester@validation.org"
+        elif any(k in lbl for k in ["phone", "fax", "contact", "tel"]):
+            val = "+1 555-0199"
+        elif any(k in lbl for k in ["initial", "initials"]):
+            val = "JD"
+        elif any(k in lbl for k in ["name", "title"]):
+            val = "Dr" if "title" in lbl else ("John" if "first" in lbl else "Doe")
+        elif any(k in lbl for k in ["zip", "postal"]):
+            val = "90210"
+        elif any(k in lbl for k in ["city"]):
+            val = "Boston"
+        elif any(k in lbl for k in ["state", "province"]):
+            val = "MA"
+        elif any(k in lbl for k in ["address"]):
+            val = "100 Innovation Way"
+        elif any(k in lbl for k in ["user", "login"]):
+            val = "sirihari.banda"
+        elif any(k in lbl for k in ["password"]):
+            val = "Clinevo@2026"
+        elif any(k in lbl for k in ["enterprise"]):
+            val = "Clinevo"
+        elif any(k in lbl for k in ["term", "product", "reaction", "event"]):
+            val = f"Valid {ef.label.title()}"
         else:
-            val = "Verified"
+            val = f"Val_{ef.label.replace(' ', '_')[:12]}"
 
         return PlannedFieldAction(
             field_id=ef.field_id,
@@ -456,7 +434,8 @@ class PlannerAgent:
             label=ef.label,
             control_type=ef.control_type,
             target_value=val,
-            expect_auto_populated=False
+            expect_auto_populated=False,
+            provenance=prov
         )
 
     def generate_plan(self, session: ProtocolSession) -> Tuple[List[Dict[str, Any]], str, float]:

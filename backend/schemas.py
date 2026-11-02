@@ -112,7 +112,7 @@ class ExtractedFieldSpec(BaseModel):
     field_id: str                        # e.g., "TS1-S09-F01"
     section: SectionType                 # Active section from protocol procedure
     label: str                           # Exact field label from protocol, e.g., "First Name", "Sex code"
-    raw_instruction: str                 # Exact instruction from protocol, e.g., "(Select from the dropdown)"
+    raw_instruction: str = ""            # Exact instruction from protocol, e.g., "(Select from the dropdown)"
     control_type: ControlType            # Inferred from protocol instruction
     explicit_value: Optional[str] = None # Populated if protocol specifies literal value (e.g., "Adverse Event")
     search_trigger_icon: bool = False    # True when instruction says "Click on the search icon..."
