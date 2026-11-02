@@ -1840,7 +1840,11 @@ class PlaywrightRunner:
                             actor_role="TEST_EXECUTOR",
                             event_type="STEP_PASSED",
                             step_id=step.step_id,
-                            details=f"Step {step.step_id} PASSED in {step.latency_ms}ms: {observed_summary}"
+                            details=f"Step {step.step_id} PASSED in {step.latency_ms}ms: {observed_summary}",
+                            screenshot_path=step.combined_screenshot_path,
+                            locked_spec_sha256=getattr(session, "plan_locked_sha256", None),
+                            inputs_applied=[i.model_dump() for i in step.applied_inputs] if step.applied_inputs else [],
+                            gate_scores=step.gate_evaluation.model_dump() if step.gate_evaluation else None
                         )
                         if is_negative_test_step(step):
                             # Ensure any stacked validation error dialog is actively cleared
@@ -1861,18 +1865,22 @@ class PlaywrightRunner:
                         step.observed_result = observed_summary
                         step.failure_reason = failure_detail
                         step.latency_ms = int((time.time() - start_step_time) * 1000)
+                        if step.screenshot_required and not step.combined_screenshot_path:
+                            err_img = await capture_evidence(step.step_id)
+                            step.combined_screenshot_path = err_img
+                            step.screenshot_url = f"/api/artifacts/screenshots/{session.session_id}/{step.step_id}.png"
                         AuditTrailManager.log_event(
                             session_id=session.session_id,
                             actor_username=creds.get("username", "tester"),
                             actor_role="TEST_EXECUTOR",
                             event_type="STEP_FAILED",
                             step_id=step.step_id,
-                            details=f"Step {step.step_id} FAILED in {step.latency_ms}ms: {failure_detail or observed_summary}"
+                            details=f"Step {step.step_id} FAILED in {step.latency_ms}ms: {failure_detail or observed_summary}",
+                            screenshot_path=step.combined_screenshot_path,
+                            locked_spec_sha256=getattr(session, "plan_locked_sha256", None),
+                            inputs_applied=[i.model_dump() for i in step.applied_inputs] if step.applied_inputs else [],
+                            gate_scores=step.gate_evaluation.model_dump() if step.gate_evaluation else None
                         )
-                        if step.screenshot_required and not step.combined_screenshot_path:
-                            err_img = await capture_evidence(step.step_id)
-                            step.combined_screenshot_path = err_img
-                            step.screenshot_url = f"/api/artifacts/screenshots/{session.session_id}/{step.step_id}.png"
                         
                         if ws_callback:
                             await ws_callback({
