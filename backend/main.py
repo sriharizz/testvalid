@@ -952,7 +952,8 @@ def get_session_summary(session_id: str):
         root_cause_analyses=root_cause_analyses,
         executive_summary=executive_summary,
         archive_status="ARCHIVED" if manifest_file.exists() else "READY_FOR_ARCHIVE",
-        manifest_sha256=manifest_sha
+        manifest_sha256=manifest_sha,
+        llm_metrics=getattr(session, "llm_metrics", None) or QwenLLMClient.get_total_usage()
     )
 
 @app.post("/api/generate-protocol")

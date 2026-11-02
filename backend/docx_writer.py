@@ -372,8 +372,16 @@ class DocxWriter:
         pass_rate = round((passed_steps / total_steps * 100), 1) if total_steps > 0 else 0.0
         overall_qualified = (failed_steps == 0 and blocked_steps == 0 and total_steps > 0)
 
-        vsr_table = doc.add_table(rows=7, cols=2)
-        vsr_table.style = 'Table Grid'
+        llm_m = getattr(session, "llm_metrics", {}) or {}
+        total_calls = llm_m.get("total_calls", 0)
+        p_tokens = llm_m.get("prompt_tokens", 0)
+        c_tokens = llm_m.get("completion_tokens", 0)
+        t_tokens = llm_m.get("total_tokens", 0)
+        m_used = llm_m.get("model_used", "Groq Qwen")
+
+        llm_calls_str = f"{total_calls} calls" if total_calls > 0 else "0 (Mode 2 Locked Deterministic Replay)"
+        llm_tokens_str = f"{t_tokens} tokens ({p_tokens} prompt context / {c_tokens} completion)" if t_tokens > 0 else "0 tokens (Zero-Token Deterministic Replay)"
+
         vsr_metrics = [
             ("Total Test Steps Executed:", str(total_steps)),
             ("Passed Steps:", str(passed_steps)),
@@ -381,8 +389,13 @@ class DocxWriter:
             ("Blocked Steps:", str(blocked_steps)),
             ("Pass Rate (%):", f"{pass_rate}%"),
             ("Locked Protocol Plan Hash:", session.plan_locked_sha256 or "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
-            ("Qualification Verdict:", "QUALIFIED / PASS" if overall_qualified else "UNQUALIFIED / DISCREPANCIES DETECTED")
+            ("Qualification Verdict:", "QUALIFIED / PASS" if overall_qualified else "UNQUALIFIED / DISCREPANCIES DETECTED"),
+            ("AI LLM Invocations:", llm_calls_str),
+            ("AI Token Footprint (Context / Gen):", llm_tokens_str),
+            ("AI Model Attribution:", m_used if total_calls > 0 else "N/A (Locked Deterministic Engine)")
         ]
+        vsr_table = doc.add_table(rows=len(vsr_metrics), cols=2)
+        vsr_table.style = 'Table Grid'
         for idx, (lbl, val) in enumerate(vsr_metrics):
             r = vsr_table.rows[idx]
             r.cells[0].text = lbl
@@ -603,20 +616,26 @@ class DocxWriter:
         h1.paragraph_format.space_before = Pt(14)
         h1.paragraph_format.space_after = Pt(6)
 
-        banner_table = doc.add_table(rows=6, cols=2)
-        banner_table.style = 'Table Grid'
         genesis_hash = "0" * 64
         root_hash = entries[-1].entry_hash if entries else genesis_hash
         verdict_str = "VERIFIED INTACT — 0 TAMPER EVENTS" if is_valid else f"TAMPER ALERT DETECTED: {err_msg}"
+
+        llm_m = getattr(session, "llm_metrics", {}) or {}
+        tot_tok = llm_m.get("total_tokens", 0)
+        tot_calls = llm_m.get("total_calls", 0)
+        ai_banner = f"{tot_calls} call(s), {tot_tok} tokens ({llm_m.get('model_used', 'Groq')})" if tot_calls > 0 else "0 LLM Calls / 0 Tokens (100% Deterministic Replay)"
 
         banner_rows = [
             ("Session Identifier:", session.session_id),
             ("Protocol Document No:", session.document_no or session.filename),
             ("Cryptographic Chain Verdict:", verdict_str),
+            ("AI & Token Traceability (ALCOA+):", ai_banner),
             ("Total Hash-Chained Events:", str(len(entries))),
             ("Genesis Hash:", genesis_hash),
             ("Final Sealed Root Hash:", root_hash)
         ]
+        banner_table = doc.add_table(rows=len(banner_rows), cols=2)
+        banner_table.style = 'Table Grid'
         for idx, (lbl, val) in enumerate(banner_rows):
             r = banner_table.rows[idx]
             r.cells[0].text = lbl

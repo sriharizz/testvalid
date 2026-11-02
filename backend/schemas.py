@@ -211,6 +211,7 @@ class AuditLogEntry(BaseModel):
     locked_spec_sha256: Optional[str] = None
     inputs_applied: List[Dict[str, Any]] = Field(default_factory=list)
     gate_scores: Optional[Dict[str, Any]] = None
+    llm_metrics: Optional[Dict[str, Any]] = None
 
 class SignatureRequest(BaseModel):
     signer_username: str
@@ -339,6 +340,7 @@ class ProtocolSession(BaseModel):
     planned_steps: List[PlannedStep] = Field(default_factory=list)
     locked_plan: Optional[LockedProtocolPlan] = None
     plan_locked_sha256: Optional[str] = None
+    llm_metrics: Dict[str, Any] = Field(default_factory=dict)
     signatures: List[ElectronicSignatureRecord] = Field(default_factory=list)
     gate1_report: Optional[CoverageGateReport] = None
     gate2_report: Optional[CoverageGateReport] = None
@@ -384,6 +386,7 @@ class ExecutionSummaryReport(BaseModel):
     executive_summary: Optional[str] = None
     archive_status: Optional[str] = "READY_FOR_ARCHIVE"
     manifest_sha256: Optional[str] = None
+    llm_metrics: Optional[Dict[str, Any]] = None
 
 class ProtocolGenerationRequest(BaseModel):
     protocol_type: Literal["OQ", "PQ"]

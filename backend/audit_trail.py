@@ -38,7 +38,8 @@ class AuditTrailManager:
         screenshot_path: Optional[str] = None,
         locked_spec_sha256: Optional[str] = None,
         inputs_applied: Optional[List[Dict[str, Any]]] = None,
-        gate_scores: Optional[Dict[str, Any]] = None
+        gate_scores: Optional[Dict[str, Any]] = None,
+        llm_metrics: Optional[Dict[str, Any]] = None
     ) -> AuditLogEntry:
         """
         Appends a cryptographically chained GxP audit log entry with optional screenshot byte hashing.
@@ -78,11 +79,19 @@ class AuditTrailManager:
         inputs_json = json.dumps(inputs_applied_clean, sort_keys=True)
         gates_json = json.dumps(gate_scores_clean, sort_keys=True)
 
-        payload = (
-            f"{sequence_no}|{now_utc}|{session_id}|{actor_username}|{event_type}|"
-            f"{details}|{screenshot_sha256 or ''}|{locked_spec_sha256 or ''}|"
-            f"{inputs_json}|{gates_json}|{prev_hash}"
-        )
+        if llm_metrics is not None:
+            llm_json = json.dumps(llm_metrics, sort_keys=True)
+            payload = (
+                f"{sequence_no}|{now_utc}|{session_id}|{actor_username}|{event_type}|"
+                f"{details}|{screenshot_sha256 or ''}|{locked_spec_sha256 or ''}|"
+                f"{inputs_json}|{gates_json}|{llm_json}|{prev_hash}"
+            )
+        else:
+            payload = (
+                f"{sequence_no}|{now_utc}|{session_id}|{actor_username}|{event_type}|"
+                f"{details}|{screenshot_sha256 or ''}|{locked_spec_sha256 or ''}|"
+                f"{inputs_json}|{gates_json}|{prev_hash}"
+            )
         entry_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
         entry = AuditLogEntry(
@@ -101,7 +110,8 @@ class AuditTrailManager:
             screenshot_sha256=screenshot_sha256,
             locked_spec_sha256=locked_spec_sha256,
             inputs_applied=inputs_applied_clean,
-            gate_scores=gate_scores
+            gate_scores=gate_scores,
+            llm_metrics=llm_metrics
         )
 
         with open(audit_file, "a", encoding="utf-8") as f:
@@ -174,15 +184,25 @@ class AuditTrailManager:
                 inputs_applied = entry.get("inputs_applied") or []
                 gate_scores = entry.get("gate_scores") or {}
                 locked_spec_sha256 = entry.get("locked_spec_sha256") or ""
+                llm_metrics = entry.get("llm_metrics")
                 inputs_json = json.dumps(inputs_applied, sort_keys=True)
                 gates_json = json.dumps(gate_scores, sort_keys=True)
 
-                payload = (
-                    f"{seq}|{entry.get('timestamp_utc')}|{entry.get('session_id')}|"
-                    f"{entry.get('actor_username')}|{entry.get('event_type')}|{entry.get('details')}|"
-                    f"{screenshot_sha256 or ''}|{locked_spec_sha256}|"
-                    f"{inputs_json}|{gates_json}|{prev_hash}"
-                )
+                if llm_metrics is not None:
+                    llm_json = json.dumps(llm_metrics, sort_keys=True)
+                    payload = (
+                        f"{seq}|{entry.get('timestamp_utc')}|{entry.get('session_id')}|"
+                        f"{entry.get('actor_username')}|{entry.get('event_type')}|{entry.get('details')}|"
+                        f"{screenshot_sha256 or ''}|{locked_spec_sha256}|"
+                        f"{inputs_json}|{gates_json}|{llm_json}|{prev_hash}"
+                    )
+                else:
+                    payload = (
+                        f"{seq}|{entry.get('timestamp_utc')}|{entry.get('session_id')}|"
+                        f"{entry.get('actor_username')}|{entry.get('event_type')}|{entry.get('details')}|"
+                        f"{screenshot_sha256 or ''}|{locked_spec_sha256}|"
+                        f"{inputs_json}|{gates_json}|{prev_hash}"
+                    )
                 expected_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
                 actual_hash = entry.get("entry_hash")
 

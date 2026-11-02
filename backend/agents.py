@@ -31,21 +31,51 @@ from schemas import LockedProtocolPlan
 
 class QwenLLMClient:
     """
-    Unified LLM Client supporting:
-    1. DGX / DCS-hosted Qwen (via OpenAI-compatible endpoint, e.g. vLLM / NVIDIA NIM / TGI / SGLang)
-    2. Groq Qwen (cloud fallback)
-    3. Intelligent Rule-Based Fallback (if remote LLM server is offline)
+    Unified LLM Client with ALCOA+ Token & Context Window Tracking.
+    Prioritizes Groq Cloud for sub-second inference. DGX/OpenAI endpoint can be toggled via LLM_PROVIDER=DGX.
+    Tracks exact prompt tokens, completion tokens, and model attribution across all invocations.
     """
+    _shared_total_calls: int = 0
+    _shared_prompt_tokens: int = 0
+    _shared_completion_tokens: int = 0
+    _shared_total_tokens: int = 0
+    _shared_last_model: Optional[str] = None
+    _shared_call_history: List[Dict[str, Any]] = []
+
     def __init__(self):
-        self.provider = os.getenv("LLM_PROVIDER", "DCS").upper()
+        self.provider = os.getenv("LLM_PROVIDER", "GROQ").upper().strip('"\'')
         self.base_url = os.getenv("QWEN_BASE_URL", "http://127.0.0.1:8000/v1")
-        self.api_key = os.getenv("QWEN_API_KEY", "dummy-key")
+        self.api_key = os.getenv("QWEN_API_KEY", "")
         self.model = os.getenv("QWEN_MODEL_NAME", "qwen2.5-72b-instruct")
         self.groq_api_key = os.getenv("GROQ_API_KEY", "")
-        self.groq_model = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+        self.groq_model = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip('"\'')
+
+    @classmethod
+    def get_total_usage(cls) -> Dict[str, Any]:
+        return {
+            "total_calls": cls._shared_total_calls,
+            "prompt_tokens": cls._shared_prompt_tokens,
+            "completion_tokens": cls._shared_completion_tokens,
+            "total_tokens": cls._shared_total_tokens,
+            "model_used": cls._shared_last_model or "Deterministic (0 LLM Calls)"
+        }
+
+    @classmethod
+    def reset_total_usage(cls) -> None:
+        cls._shared_total_calls = 0
+        cls._shared_prompt_tokens = 0
+        cls._shared_completion_tokens = 0
+        cls._shared_total_tokens = 0
+        cls._shared_last_model = None
+        cls._shared_call_history.clear()
 
     def is_dgx_configured(self) -> bool:
-        return self.provider in ["DGX", "DCS"] and bool(self.api_key and self.api_key != "paste_your_dcs_api_key_here")
+        # DGX is only enabled when explicitly configured via LLM_PROVIDER=DGX or LLM_PROVIDER=DCS
+        # and has a real non-dummy key. Otherwise, do not send requests to DGX.
+        return (
+            self.provider in ["DGX", "DCS"]
+            and bool(self.api_key and self.api_key not in ["dummy-key", "paste_your_dcs_api_key_here", ""])
+        )
 
     # Alias for backwards compatibility
     is_dcs_configured = is_dgx_configured
@@ -66,11 +96,33 @@ class QwenLLMClient:
                     kwargs["response_format"] = {"type": "json_object"}
                 res = g_client.chat.completions.create(**kwargs)
                 if res.choices and res.choices[0].message.content:
+                    usage = getattr(res, "usage", None)
+                    p_tok = getattr(usage, "prompt_tokens", 0) or 0
+                    c_tok = getattr(usage, "completion_tokens", 0) or 0
+                    t_tok = getattr(usage, "total_tokens", p_tok + c_tok) or 0
+
+                    QwenLLMClient._shared_total_calls += 1
+                    QwenLLMClient._shared_prompt_tokens += p_tok
+                    QwenLLMClient._shared_completion_tokens += c_tok
+                    QwenLLMClient._shared_total_tokens += t_tok
+                    QwenLLMClient._shared_last_model = f"Groq ({self.groq_model})"
+                    QwenLLMClient._shared_call_history.append({
+                        "call_index": QwenLLMClient._shared_total_calls,
+                        "provider": "GROQ",
+                        "model": self.groq_model,
+                        "prompt_tokens": p_tok,
+                        "completion_tokens": c_tok,
+                        "total_tokens": t_tok,
+                        "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    })
                     return res.choices[0].message.content.strip()
             except Exception as ge:
                 print(f"[QwenLLMClient] Groq primary note: {ge}")
+            # If provider is GROQ, do not attempt DGX (as requested, DGX is offline/not available)
+            if self.provider == "GROQ":
+                return None
 
-        # 2. Secondary / Local: DGX Server
+        # 2. Secondary / Explicit: DGX Server (Only when provider is DGX/DCS and configured)
         if self.provider in ["DGX", "DCS"] and self.is_dgx_configured():
             try:
                 from openai import OpenAI
@@ -86,11 +138,30 @@ class QwenLLMClient:
                 except Exception:
                     res = client.chat.completions.create(**call_kwargs)
                 if res.choices and res.choices[0].message.content:
+                    usage = getattr(res, "usage", None)
+                    p_tok = getattr(usage, "prompt_tokens", 0) or 0
+                    c_tok = getattr(usage, "completion_tokens", 0) or 0
+                    t_tok = getattr(usage, "total_tokens", p_tok + c_tok) or 0
+
+                    QwenLLMClient._shared_total_calls += 1
+                    QwenLLMClient._shared_prompt_tokens += p_tok
+                    QwenLLMClient._shared_completion_tokens += c_tok
+                    QwenLLMClient._shared_total_tokens += t_tok
+                    QwenLLMClient._shared_last_model = f"DGX ({self.model})"
+                    QwenLLMClient._shared_call_history.append({
+                        "call_index": QwenLLMClient._shared_total_calls,
+                        "provider": "DGX",
+                        "model": self.model,
+                        "prompt_tokens": p_tok,
+                        "completion_tokens": c_tok,
+                        "total_tokens": t_tok,
+                        "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    })
                     return res.choices[0].message.content.strip()
             except Exception as e:
                 print(f"[QwenLLMClient] DGX Qwen invocation note: {e}")
 
-        # 3. Fallback to Groq if DGX failed
+        # 3. Fallback to Groq if DGX was chosen but failed
         if self.groq_api_key:
             try:
                 import groq
@@ -105,6 +176,16 @@ class QwenLLMClient:
                     kwargs["response_format"] = {"type": "json_object"}
                 res = g_client.chat.completions.create(**kwargs)
                 if res.choices and res.choices[0].message.content:
+                    usage = getattr(res, "usage", None)
+                    p_tok = getattr(usage, "prompt_tokens", 0) or 0
+                    c_tok = getattr(usage, "completion_tokens", 0) or 0
+                    t_tok = getattr(usage, "total_tokens", p_tok + c_tok) or 0
+
+                    QwenLLMClient._shared_total_calls += 1
+                    QwenLLMClient._shared_prompt_tokens += p_tok
+                    QwenLLMClient._shared_completion_tokens += c_tok
+                    QwenLLMClient._shared_total_tokens += t_tok
+                    QwenLLMClient._shared_last_model = f"Groq ({self.groq_model})"
                     return res.choices[0].message.content.strip()
             except Exception as ge:
                 print(f"[QwenLLMClient] Groq fallback note: {ge}")

@@ -39,6 +39,13 @@ export interface SummaryReportData {
   compliance_statement: string;
   archive_status?: string;
   manifest_sha256?: string | null;
+  llm_metrics?: {
+    total_calls?: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    model_used?: string;
+  };
 }
 
 interface ExecutionSummaryModalProps {
@@ -113,24 +120,33 @@ export const ExecutionSummaryModal: React.FC<ExecutionSummaryModalProps> = ({
         {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-6">
           {/* KPI Matrix Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-center">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Steps</span>
-              <p className="text-2xl font-bold text-slate-800 mt-1">{summary.total_steps}</p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Total Steps</span>
+              <p className="text-xl font-bold text-slate-800 mt-1">{summary.total_steps}</p>
             </div>
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 text-center">
-              <span className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider">Passed</span>
-              <p className="text-2xl font-bold text-emerald-700 mt-1">{summary.passed_count}</p>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">Passed</span>
+              <p className="text-xl font-bold text-emerald-700 mt-1">{summary.passed_count}</p>
             </div>
-            <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 text-center">
-              <span className="text-[11px] font-semibold text-rose-600 uppercase tracking-wider">Failed / Blocked</span>
-              <p className="text-2xl font-bold text-rose-700 mt-1">{summary.failed_count + summary.blocked_count}</p>
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-semibold text-rose-600 uppercase tracking-wider">Failed / Blocked</span>
+              <p className="text-xl font-bold text-rose-700 mt-1">{summary.failed_count + summary.blocked_count}</p>
             </div>
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 text-center">
-              <span className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider">21 CFR Part 11</span>
-              <p className="text-sm font-bold text-blue-700 mt-2 flex items-center justify-center gap-1">
-                <ShieldCheck className="w-4 h-4 text-blue-600" />
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">21 CFR Part 11</span>
+              <p className="text-xs font-bold text-blue-700 mt-2 flex items-center justify-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
                 <span>Watermarked</span>
+              </p>
+            </div>
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-center">
+              <span className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider">AI Token Footprint</span>
+              <p className="text-lg font-bold text-purple-900 mt-0.5">
+                {summary.llm_metrics?.total_tokens ? `${summary.llm_metrics.total_tokens} tok` : '0 Tokens'}
+              </p>
+              <p className="text-[9px] text-purple-600 mt-0.5 font-medium truncate" title={summary.llm_metrics?.total_calls ? `${summary.llm_metrics.total_calls} calls` : '100% Deterministic'}>
+                {summary.llm_metrics?.total_calls ? `${summary.llm_metrics.total_calls} calls (${summary.llm_metrics.prompt_tokens || 0} ctx)` : '100% Deterministic (0 LLM)'}
               </p>
             </div>
           </div>
