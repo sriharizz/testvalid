@@ -211,6 +211,37 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleLoadDirectSession = async (data: ProtocolSession) => {
+    setIsAuthoring(true);
+    setAuthoringStage(1);
+    try {
+      const rawRes = await fetch(`/api/raw-protocol/${data.session_id}`);
+      if (rawRes.ok) {
+        const buf = await rawRes.arrayBuffer();
+        setRawDocxBuffer(buf);
+      }
+
+      setAuthoringStage(2);
+      await sleep(400);
+      setAuthoringStage(3);
+      await sleep(250);
+      setAuthoringStage(4);
+      await sleep(250);
+      setAuthoringStage(5);
+      await sleep(250);
+      setAuthoringStage(6);
+      await sleep(150);
+
+      setSession(data);
+      setSelectedStepId(data.steps && data.steps.length > 0 ? data.steps[0].step_id : null);
+    } catch (err) {
+      console.error('Failed to load direct session:', err);
+    } finally {
+      setIsAuthoring(false);
+      setAuthoringStage(7);
+    }
+  };
+
   // Live WebSocket Connection for Real-time Execution Updates
   const setupWebSocket = (sessionId: string) => {
     if (wsRef.current) {
@@ -559,6 +590,7 @@ export const App: React.FC = () => {
         isOpen={isAuthoringModalOpen}
         onClose={() => setIsAuthoringModalOpen(false)}
         onLoadGeneratedProtocol={(filename) => handleLoadSample(filename)}
+        onLoadDirectSession={handleLoadDirectSession}
       />
 
       {/* AI Executive Summary & Root-Cause Analysis Modal */}

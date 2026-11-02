@@ -512,6 +512,72 @@ def infer_step_assertions(procedure: str, expected_result: str, fields: List[Ext
 
     return assertions
 
+def extract_prose_fields_fallback(step_id: str, primary_section: SectionType, procedure_text: str, existing_fields: List[ExtractedFieldSpec]) -> List[ExtractedFieldSpec]:
+    """
+    Catches natural-language prose instructions that do not use 'Label: Value' colons, e.g.:
+    - "Pick 'Serious' for seriousness"
+    - "choose 'Physician' as reporter type"
+    - "Set admission date to a future date (tomorrow)"
+    """
+    existing_labels = {ef.label.lower() for ef in existing_fields}
+    fields = list(existing_fields)
+    counter = len(fields)
+
+    # Pattern 1: pick/select/choose 'VAL' for/as/in LABEL
+    for m in re.finditer(r"(?:pick|select|choose)\s+['\"]([^'\"]+)['\"]\s+(?:for|as|in)\s+([a-zA-Z0-9\s/_-]+?)(?:[\.,;—\-]|and\b|this\b|$)", procedure_text, re.I):
+        val, lbl = m.group(1).strip(), m.group(2).strip().title()
+        if lbl.lower() not in existing_labels and len(lbl) <= 35:
+            counter += 1
+            existing_labels.add(lbl.lower())
+            fields.append(ExtractedFieldSpec(
+                field_id=f"{step_id}-F{counter:02d}",
+                section=primary_section,
+                label=lbl,
+                raw_instruction=f"(Prose select '{val}')",
+                control_type="select",
+                explicit_value=val
+            ))
+
+    # Pattern 2: set/enter LABEL to/as VALUE
+    for m in re.finditer(r"(?:set|enter)\s+([a-zA-Z0-9\s/_-]+?)\s+to\s+(a future date(?:\s*\([^\)]+\))?|tomorrow|yesterday|today|['\"][^'\"]+['\"]|\d{4}-\d{2}-\d{2})", procedure_text, re.I):
+        lbl, raw_val = m.group(1).strip().title(), m.group(2).strip().strip("'\"")
+        if lbl.lower() not in existing_labels and len(lbl) <= 35:
+            counter += 1
+            existing_labels.add(lbl.lower())
+            is_date = "date" in lbl.lower() or any(k in raw_val.lower() for k in ["future", "tomorrow", "yesterday", "today"])
+            norm_val = "TODAY+1" if ("future" in raw_val.lower() or "tomorrow" in raw_val.lower()) else ("TODAY-1" if "yesterday" in raw_val.lower() else raw_val)
+            fields.append(ExtractedFieldSpec(
+                field_id=f"{step_id}-F{counter:02d}",
+                section=primary_section,
+                label=lbl,
+                raw_instruction=f"(Prose set '{raw_val}')",
+                control_type="date" if is_date else "text",
+                explicit_value=norm_val
+            ))
+
+    return fields
+
+def score_step_parseability(procedure_text: str, extracted_fields: List[ExtractedFieldSpec], action_intent: str) -> Tuple[float, bool]:
+    """
+    CPU Confidence Sieve:
+    Returns (cpu_parse_confidence: float, needs_mode1_discovery: bool).
+    Flags steps that contain dynamic DOM conditions, unstated mandatory fields, or unextracted prose verbs.
+    """
+    proc_l = (procedure_text or "").lower()
+    dynamic_or_vague_markers = [
+        "all other mandatory", "mandatory fields", "dummy data", "valid data",
+        "opens the", "sub-section", "subsection", "if visible", "when prompted",
+        "dynamically", "future date", "tomorrow"
+    ]
+    if any(m in proc_l for m in dynamic_or_vague_markers):
+        return 0.45, True
+
+    has_entry_verbs = any(v in proc_l for v in ["enter ", "fill ", "select ", "choose ", "pick ", "set "])
+    if action_intent == "FORM_ENTRY" and has_entry_verbs and len(extracted_fields) == 0:
+        return 0.30, True
+
+    return 1.0, False
+
 def extract_protocol(file_path: str) -> ProtocolSession:
     """
     Stage 1: Universal Protocol Extractor.
@@ -648,6 +714,8 @@ def extract_protocol(file_path: str) -> ProtocolSession:
 
             action_intent, primary_sec = classify_action_intent(scenario, normalized_procedure, expected_result)
             extracted_fields = extract_fields_from_procedure(step_id, primary_sec, normalized_procedure)
+            extracted_fields = extract_prose_fields_fallback(step_id, primary_sec, normalized_procedure, extracted_fields)
+            cpu_conf, needs_discovery = score_step_parseability(normalized_procedure, extracted_fields, action_intent)
             sub_actions = generate_sub_actions_from_step(step_id, normalized_procedure, extracted_fields, screenshot_required)
             step_assertions = infer_step_assertions(normalized_procedure, expected_result, extracted_fields)
 
@@ -675,6 +743,8 @@ def extract_protocol(file_path: str) -> ProtocolSession:
                 test_set_number=test_set_counter,
                 test_set_title=test_set_title,
                 capture_before_modal_ok=capture_before_modal_dismiss,
+                cpu_parse_confidence=cpu_conf,
+                needs_mode1_discovery=needs_discovery,
                 test_data={}
             )
             protocol_steps.append(step)

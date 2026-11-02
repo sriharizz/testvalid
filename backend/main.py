@@ -22,7 +22,8 @@ from schemas import (
     ProtocolSession, ProtocolStep, TraceStage, ReadinessFlag,
     ProtocolGenerationRequest, ProtocolGenerationResponse,
     ExecutionSummaryReport, StepRootCauseAnalysis,
-    SignatureRequest, ApproveReviewRequest, ElectronicSignatureRecord, AuditLogEntry
+    SignatureRequest, ApproveReviewRequest, ElectronicSignatureRecord, AuditLogEntry,
+    DirectProtocolAuthorRequest
 )
 from audit_trail import AuditTrailManager
 import datetime
@@ -944,6 +945,40 @@ def generate_protocol(req: ProtocolGenerationRequest):
             version=req.version
         )
     return res
+
+@app.post("/api/author-direct-session")
+def author_direct_session(req: DirectProtocolAuthorRequest):
+    session, docx_path = ProtocolGenerator.create_direct_session(req)
+    sessions[session.session_id] = session
+    session_file_paths[session.session_id] = docx_path
+    AuditTrailManager.log_event(
+        session_id=session.session_id,
+        actor_username="system",
+        actor_role="SYSTEM",
+        event_type="PROTOCOL_UPLOADED",
+        details=f"Direct In-System Protocol '{req.document_no}' authored in Studio ({len(session.steps)} steps, 0 .docx parsing overhead)"
+    )
+    dom_map = get_dom_map()
+    planner = PlannerAgent(dom_map)
+    plan_steps, md_plan, plan_latency = planner.generate_plan(session)
+    session_plans[session.session_id] = plan_steps
+
+    if len(session.trace_stages) > 1:
+        session.trace_stages[1].status = "PASS"
+        session.trace_stages[1].latency_seconds = plan_latency
+        session.trace_stages[1].subtitle = f"Plan mapped ({len(plan_steps)} steps)"
+        session.trace_stages[1].artifact_content = md_plan
+
+    add_protocol_to_catalog(req.product_id, {
+        "filename": session.filename,
+        "document_no": session.document_no,
+        "protocol_type": req.protocol_type,
+        "size_kb": round(Path(docx_path).stat().st_size / 1024, 1),
+        "step_count": len(session.steps),
+        "updated_at": "Just now (Studio)",
+        "product_id": req.product_id
+    })
+    return session.model_dump()
 
 
 @app.websocket("/ws/session/{session_id}")

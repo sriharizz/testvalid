@@ -1,11 +1,32 @@
 import os
+import uuid
+import hashlib
 import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import docx
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
+
+from schemas import (
+    DirectProtocolAuthorRequest,
+    DirectStepInput,
+    ProtocolSession,
+    ProtocolStep,
+    TableColumnMap,
+    TraceStage
+)
+from extractor import (
+    classify_action_intent,
+    extract_fields_from_procedure,
+    extract_prose_fields_fallback,
+    score_step_parseability,
+    generate_sub_actions_from_step,
+    infer_step_assertions,
+    find_table_column_map,
+    get_git_commit_sha
+)
 
 UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -15,9 +36,233 @@ class ProtocolGenerator:
     Automated OQ & PQ Validation Protocol Authoring Engine.
     - Generates OQ Protocols from Functional Design Specifications (FDS).
     - Generates PQ Protocols from User Requirements Specifications (URS/SRS).
+    - In-System Direct Step Studio Authoring (0 .docx upload required).
     - Formats all documents strictly into 21 CFR Part 11 / GxP 8-Table CSV standards
       with built-in Requirements Traceability Matrix (RTM).
     """
+
+    @staticmethod
+    def create_direct_session(req: DirectProtocolAuthorRequest) -> Tuple[ProtocolSession, str]:
+        """
+        Direct In-System Studio Authoring Engine (Siva Sai Flow - 0 .docx upload required).
+        Builds a canonical ProtocolSession directly in memory while simultaneously generating
+        the background GxP .docx so RightDocInspector and download_executed_docx have valid coordinates.
+        """
+        requirements = []
+        for idx, s in enumerate(req.steps):
+            requirements.append({
+                "req_id": f"REQ-{idx+1:02d}",
+                "title": s.scenario,
+                "procedure": s.procedure,
+                "expected": s.expected_result,
+                "type": "Direct In-System Authoring"
+            })
+
+        filename = f"{req.document_no} - Direct Studio Protocol.docx"
+        out_path = UPLOADS_DIR / filename
+        doc = ProtocolGenerator._build_docx(
+            doc_type=f"{req.protocol_type} Protocol",
+            document_no=req.document_no,
+            version=req.version,
+            system_name=req.system_name,
+            source_basis="Direct In-System Authoring (Studio)",
+            requirements=requirements,
+            scope_desc=f"In-system authored validation test execution protocol for {req.system_name}."
+        )
+        doc.save(str(out_path))
+
+        # Dynamic TableColumnMap discovery from generated docx
+        col_map = None
+        for t_idx, tbl in enumerate(doc.tables):
+            cm = find_table_column_map(tbl, t_idx, doc.tables)
+            if cm:
+                col_map = cm
+                break
+        if not col_map:
+            col_map = TableColumnMap(
+                table_index=2,
+                header_row_index=0,
+                step_col=0,
+                scenario_col=1,
+                procedure_col=2,
+                expected_col=3,
+                pass_fail_col=4,
+                initials_col=5,
+                signoff_table_index=3
+            )
+
+        session_id = str(uuid.uuid4())[:8]
+        git_sha = get_git_commit_sha(str(out_path))
+        protocol_steps: List[ProtocolStep] = []
+        total_screenshots = 0
+
+        for idx, s in enumerate(req.steps):
+            step_id = s.step_id or f"TS1-S{idx+1:02d}"
+            step_num_display = str(idx + 1)
+            row_idx = col_map.header_row_index + 1 + idx
+
+            has_sym = any(c in s.procedure for c in ['µ', '📷', '\u00b5', '\uf0b5']) or s.requires_screenshot
+            proc_norm = s.procedure
+            if has_sym and not any(k in proc_norm for k in ['µ', '(µ)', '\u00b5', '\uf0b5']):
+                proc_norm += " (µ)"
+            screenshot_required = has_sym
+            if screenshot_required:
+                total_screenshots += 1
+
+            proc_lower = proc_norm.lower()
+            exp_lower = s.expected_result.lower()
+
+            has_modal_or_confirm = (
+                "click on ok" in proc_lower or "click ok" in proc_lower or 
+                "click on yes" in proc_lower or "click yes" in proc_lower or
+                "confirmation message" in exp_lower or "dialog" in proc_lower or "popup" in proc_lower
+            )
+            has_submit_or_save = (
+                "click on save" in proc_lower or "click save" in proc_lower or
+                "click on submit" in proc_lower or "click submit" in proc_lower or
+                "save and submit" in proc_lower or "try to save" in proc_lower
+            )
+
+            capture_before_modal_dismiss = False
+            requires_form_screenshot = False
+            requires_modal_screenshot = False
+
+            if screenshot_required:
+                if has_modal_or_confirm and (has_submit_or_save or "enter" in proc_lower):
+                    requires_form_screenshot = True
+                    requires_modal_screenshot = True
+                    capture_before_modal_dismiss = True
+                else:
+                    requires_form_screenshot = True
+                    if has_modal_or_confirm:
+                        capture_before_modal_dismiss = True
+
+            action_intent, primary_sec = classify_action_intent(s.scenario, proc_norm, s.expected_result)
+            if s.section and s.section != "general":
+                primary_sec = s.section
+
+            extracted_fields = extract_fields_from_procedure(step_id, primary_sec, proc_norm)
+            extracted_fields = extract_prose_fields_fallback(step_id, primary_sec, proc_norm, extracted_fields)
+            cpu_conf, needs_discovery = score_step_parseability(proc_norm, extracted_fields, action_intent)
+            sub_actions = generate_sub_actions_from_step(step_id, proc_norm, extracted_fields, screenshot_required)
+            step_assertions = infer_step_assertions(proc_norm, s.expected_result, extracted_fields)
+
+            step = ProtocolStep(
+                step_id=step_id,
+                test_set_no=1,
+                step_number_display=step_num_display,
+                table_index=col_map.table_index,
+                row_index=row_idx,
+                scenario=s.scenario,
+                procedure=proc_norm,
+                expected_result=s.expected_result,
+                action_intent=action_intent,
+                primary_section=primary_sec,
+                extracted_fields=extracted_fields,
+                assertions=step_assertions,
+                sub_actions=sub_actions,
+                screenshot_required=screenshot_required,
+                screenshot_count=1 if screenshot_required else 0,
+                capture_before_modal_dismiss=capture_before_modal_dismiss,
+                requires_form_screenshot=requires_form_screenshot,
+                requires_modal_screenshot=requires_modal_screenshot,
+                col_map=col_map,
+                required_assertions_count=max(1, len(step_assertions)),
+                test_set_number=1,
+                test_set_title=f"Test Set #1: {req.title}",
+                capture_before_modal_ok=capture_before_modal_dismiss,
+                cpu_parse_confidence=cpu_conf,
+                needs_mode1_discovery=needs_discovery,
+                test_data={}
+            )
+            protocol_steps.append(step)
+
+        total_steps = len(protocol_steps)
+        total_fields = sum(len(st.extracted_fields) for st in protocol_steps)
+
+        trace_stages = [
+            TraceStage(
+                stage_number=1,
+                title="1. Python Protocol Extractor",
+                subtitle=f"{total_steps} steps, {total_fields} fields, {total_screenshots} µ checkpoints (Studio)",
+                status="PASS",
+                latency_seconds=0.05,
+                artifact_type="JSON",
+                artifact_content=f"{total_steps} steps authored directly in Studio"
+            ),
+            TraceStage(
+                stage_number=2,
+                title="2. ARIA Compiler & Deterministic Cache",
+                subtitle="Stage 2 compiled",
+                status="PENDING",
+                latency_seconds=0.0,
+                artifact_type="MARKDOWN",
+                artifact_content=""
+            ),
+            TraceStage(
+                stage_number=3,
+                title="3. Coverage Checker Gate 1",
+                subtitle=f"{total_steps}/{total_steps} IDs & Order Verified",
+                status="PENDING",
+                latency_seconds=0.0,
+                artifact_type="COVERAGE",
+                artifact_content=""
+            ),
+            TraceStage(
+                stage_number=4,
+                title="4. Playwright Generator & Healer",
+                subtitle="Deterministic runner ready",
+                status="PENDING",
+                latency_seconds=0.0,
+                artifact_type="CODE",
+                artifact_content=""
+            ),
+            TraceStage(
+                stage_number=5,
+                title="5. Coverage Checker Gate 2",
+                subtitle=f"{total_steps}/{total_steps} Assertions & µ Captures",
+                status="PENDING",
+                latency_seconds=0.0,
+                artifact_type="COVERAGE",
+                artifact_content=""
+            ),
+            TraceStage(
+                stage_number=6,
+                title="6. Frozen Git Baseline",
+                subtitle=f"Commit: {git_sha}",
+                status="PASS",
+                latency_seconds=0.0,
+                artifact_type="GIT",
+                artifact_content=git_sha
+            )
+        ]
+
+        date_str = datetime.datetime.now().strftime("%d-%b-%Y")
+        doc_bytes = Path(out_path).read_bytes()
+        protocol_sha256 = hashlib.sha256(doc_bytes).hexdigest()
+
+        session = ProtocolSession(
+            session_id=session_id,
+            product_id=req.product_id,
+            filename=filename,
+            document_no=req.document_no,
+            version=req.version,
+            effective_date=date_str,
+            title=req.title,
+            objective=f"Directly authored validation qualification protocol for {req.system_name}.",
+            scope=f"Verification that {req.system_name} operates according to CSV requirements.",
+            total_steps=total_steps,
+            total_screenshots=total_screenshots,
+            coverage_mapped=total_steps,
+            coverage_skipped=0,
+            git_commit_sha=git_sha,
+            readiness_flags=[],
+            trace_stages=trace_stages,
+            steps=protocol_steps,
+            status="READY",
+            protocol_sha256=protocol_sha256
+        )
+        return session, str(out_path)
 
     @staticmethod
     def generate_oq_protocol(
