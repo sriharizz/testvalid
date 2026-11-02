@@ -635,6 +635,19 @@ def download_companion_evidence_docx(session_id: str):
         filename=f"Screenshot_Evidence_{clean_name}.docx"
     )
 
+@app.get("/api/download-audit-certificate/{session_id}")
+def download_audit_certificate(session_id: str):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = sessions[session_id]
+    cert_docx = DocxWriter.generate_audit_trail_certificate_docx(session=session)
+    clean_name = session.filename[:-5] if session.filename.endswith(".docx") else session.filename
+    return FileResponse(
+        cert_docx,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"Audit_Trail_Certificate_{clean_name}.docx"
+    )
+
 @app.post("/api/archive-session/{session_id}")
 def archive_session(session_id: str):
     import hashlib
@@ -669,6 +682,16 @@ def archive_session(session_id: str):
     evid_docx = ARTIFACTS_DIR / f"Screenshot_Evidence_{session.filename}"
     if evid_docx.exists():
         hash_and_copy(evid_docx, f"Screenshot_Evidence_{session.filename}")
+
+    clean_name = session.filename[:-5] if session.filename.endswith(".docx") else session.filename
+    cert_docx = ARTIFACTS_DIR / f"Audit_Trail_Certificate_{clean_name}.docx"
+    if not cert_docx.exists():
+        try:
+            DocxWriter.generate_audit_trail_certificate_docx(session=session)
+        except Exception as e:
+            print(f"[Archive] Warning generating audit certificate: {e}")
+    if cert_docx.exists():
+        hash_and_copy(cert_docx, f"Audit_Trail_Certificate_{clean_name}.docx")
 
     sc_dir = SCREENSHOTS_DIR / session_id
     if sc_dir.exists():

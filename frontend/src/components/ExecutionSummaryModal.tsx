@@ -242,6 +242,15 @@ export const ExecutionSummaryModal: React.FC<ExecutionSummaryModalProps> = ({
               <Download className="w-3.5 h-3.5" />
               <span>Download Evidence Dossier (.docx)</span>
             </button>
+            <button
+              onClick={() => {
+                window.location.href = `/api/download-audit-certificate/${summary.session_id}`;
+              }}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg flex items-center gap-1.5 shadow-xs"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Download Audit Certificate (.docx)</span>
+            </button>
           </div>
         </div>
       </div>
