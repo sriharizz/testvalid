@@ -4,6 +4,54 @@ from typing import List, Dict, Optional, Literal, Any
 # Flexible SectionType to support OnePV, Signal, 1PV, and custom client products
 SectionType = str
 
+ValueProvenance = Literal[
+    "protocol_explicit",        # Value explicitly stated in Word doc or System UI table
+    "cpu_semantic_match",       # Matched to DOM label/option via local CPU matcher (>= 0.80)
+    "ai_mapped_synonym",        # Mapped by Qwen against live dropdown options (e.g. "Physician" -> "HCP")
+    "ai_synthesized_mandatory", # Synthesized for required form field not explicitly listed in step
+    "computed_dynamic"          # Dynamic runtime token resolved (e.g. TODAY, TODAY+1)
+]
+
+class AppliedInputRecord(BaseModel):
+    field_label: str
+    selector_used: str = ""
+    value_applied: str
+    original_term: Optional[str] = None
+    provenance: ValueProvenance = "protocol_explicit"
+    readback_verified: bool = True
+
+class GateEvaluationResult(BaseModel):
+    gate1_polarity_and_http: str = "PASS"       # e.g. "PASS (HTTP 2xx, 0 unexpected UI errors)"
+    gate1_passed: bool = True
+    gate2_field_and_entity_guard: str = "PASS"  # e.g. "PASS (Entity CAS-9821 verified; no ERR- prefix)"
+    gate2_passed: bool = True
+    gate3_semantic_similarity: float = 1.0      # 0.0 to 1.0 from cpu_semantic_matcher
+    gate3_method: str = "CPU_SEMANTIC_HYBRID"
+    gate3_passed: bool = True
+    gate4_llm_tiebreaker_used: bool = False
+    gate4_verdict: Optional[str] = None
+    final_status: Literal["PASS", "FAIL"] = "PASS"
+    observed_summary: str = ""
+    failure_reason: Optional[str] = None
+
+class DirectStepInput(BaseModel):
+    step_id: Optional[str] = None
+    scenario: str
+    procedure: str
+    expected_result: str
+    section: Optional[str] = "general"
+    requires_screenshot: bool = True
+
+class DirectProtocolAuthorRequest(BaseModel):
+    protocol_type: Literal["OQ", "PQ", "OPS"] = "PQ"
+    product_id: str = "onepv"
+    system_name: str = "OnePV Safety System"
+    document_no: str = "CLIN-EU-PAT-OPV-1-1-PQ-DIRECT"
+    version: str = "1.0"
+    title: str = "System-Authored Qualification Protocol"
+    target_url: str = "https://mpv-two.vercel.app"
+    steps: List[DirectStepInput]
+
 AssertionType = Literal[
     "ENTITY_CREATED",        # Regex pattern match for generated ID in dialog/DOM
     "MESSAGE_DISPLAYED",     # Positive confirmation modal/toast with target_text
@@ -100,6 +148,9 @@ class CompiledControlLocator(BaseModel):
     target_value: str
     is_optional: bool = False
     expect_auto_populated: bool = False
+    provenance: ValueProvenance = "protocol_explicit"
+    original_term: Optional[str] = None
+    triggers_dom_mutation: bool = False
 
 class LockedStepSpec(BaseModel):
     step_id: str
@@ -155,6 +206,11 @@ class AuditLogEntry(BaseModel):
     justification: Optional[str] = None
     prev_hash: str
     entry_hash: str
+    screenshot_file: Optional[str] = None
+    screenshot_sha256: Optional[str] = None
+    locked_spec_sha256: Optional[str] = None
+    inputs_applied: List[Dict[str, Any]] = Field(default_factory=list)
+    gate_scores: Optional[Dict[str, Any]] = None
 
 class SignatureRequest(BaseModel):
     signer_username: str
@@ -163,10 +219,12 @@ class SignatureRequest(BaseModel):
     signer_role: Literal["TEST_EXECUTOR", "QA_REVIEWER", "APPROVER"]
     signature_meaning: str
     password: Optional[str] = None
+    justification: Optional[str] = None
 
 class ApproveReviewRequest(BaseModel):
     justification: str
     reviewer: Optional[str] = "QA Reviewer"
+    reviewer_username: Optional[str] = "qa.reviewer"
 
 class ProtocolStep(BaseModel):
     step_id: str                         # e.g., "TS1-S01" .. "TS1-S18"
@@ -190,6 +248,11 @@ class ProtocolStep(BaseModel):
     requires_form_screenshot: bool = False
     requires_modal_screenshot: bool = False
     col_map: Optional[TableColumnMap] = None
+    cpu_parse_confidence: float = 1.0
+    needs_mode1_discovery: bool = False
+    applied_inputs: List[AppliedInputRecord] = Field(default_factory=list)
+    gate_evaluation: Optional[GateEvaluationResult] = None
+    screenshot_sha256: Optional[str] = None
 
     # Runtime Execution Results
     status: Literal["QUEUED", "EXECUTING", "PASS", "FAIL", "BLOCKED"] = "QUEUED"
@@ -221,6 +284,9 @@ class PlannedFieldAction(BaseModel):
     control_type: ControlType
     target_value: str                    # Synthesized by Qwen Planner (or preserved from explicit_value)
     expect_auto_populated: bool = False
+    provenance: ValueProvenance = "protocol_explicit"
+    original_term: Optional[str] = None
+    triggers_dom_mutation: bool = False
 
 class PlannedStep(BaseModel):
     step_id: str
@@ -288,6 +354,8 @@ class ProtocolSession(BaseModel):
     git_commit_sha: Optional[str] = None
     readiness_flags: List[ReadinessFlag] = Field(default_factory=list)
     trace_stages: List[TraceStage] = Field(default_factory=list)
+    status: str = "READY"
+    protocol_sha256: Optional[str] = None
 
 class StepRootCauseAnalysis(BaseModel):
     step_id: str
