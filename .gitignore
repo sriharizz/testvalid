@@ -24,6 +24,8 @@ backend/artifacts/screenshots/
 backend/artifacts/temp/
 backend/artifacts/archive/
 backend/artifacts/plan_cache/
+backend/artifacts/*.spec.ts
+backend/uploads/*.docx
 *.tmp
 
 # IDE & OS

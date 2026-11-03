@@ -11,7 +11,7 @@ import json
 import asyncio
 import threading
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -63,6 +63,8 @@ session_approval_events: Dict[str, asyncio.Event] = {}
 session_halt_flags: Dict[str, bool] = {}
 session_file_paths: Dict[str, str] = {}
 active_connections: Dict[str, List[WebSocket]] = {}
+session_summary_cache: Dict[str, Any] = {}
+session_start_llm_metrics: Dict[str, Dict[str, Any]] = {}
 
 # Mount screenshots directory
 app.mount("/api/artifacts/screenshots", StaticFiles(directory=str(SCREENSHOTS_DIR)), name="screenshots")
@@ -98,6 +100,7 @@ def run_authoring_pipeline(file_path: str, filename: str, product_id: str = 'one
     session.filename = filename
     session.product_id = product_id
     sessions[session.session_id] = session
+    session_start_llm_metrics[session.session_id] = QwenLLMClient.get_total_usage()
 
     AuditTrailManager.log_event(
         session_id=session.session_id,
@@ -164,6 +167,7 @@ def run_authoring_pipeline(file_path: str, filename: str, product_id: str = 'one
     session.trace_stages[5].artifact_content = f"Repository Baseline: {git_sha}\nArtifacts: generated_{session.session_id}.spec.ts\nAll 6 gates passing."
 
     sessions[session.session_id] = session
+    session_start_llm_metrics[session.session_id] = QwenLLMClient.get_total_usage()
     return session
 
 @app.get("/api/health")
@@ -907,6 +911,44 @@ def generate_ai_executive_summary(
 @app.get("/api/session-summary/{session_id}", response_model=ExecutionSummaryReport)
 def get_session_summary(session_id: str):
     if session_id not in sessions:
+        audit_file = ARTIFACTS_DIR / "archive" / session_id / "audit_trail.jsonl"
+        if audit_file.exists():
+            steps = []
+            doc_no = "CLIN-EU-PAT-OPV-1-1-PQ-022"
+            with open(audit_file, "r", encoding="utf-8") as af:
+                for line in af:
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("event_type") == "PROTOCOL_UPLOADED":
+                            details = entry.get("details", "")
+                            m = re.search(r"Protocol '([^']+)'", details)
+                            if m:
+                                doc_no = m.group(1)
+                        if entry.get("step_id"):
+                            status = "PASS" if entry.get("event_type") == "STEP_PASSED" else ("FAIL" if entry.get("event_type") == "STEP_FAILED" else "QUEUED")
+                            steps.append(ProtocolStep(
+                                step_id=entry["step_id"],
+                                status=status,
+                                failure_reason=entry.get("gate_scores", {}).get("failure_reason") if entry.get("gate_scores") else None,
+                                observed_result=entry.get("details")
+                            ))
+                    except Exception:
+                        pass
+            if steps:
+                session = ProtocolSession(
+                    session_id=session_id,
+                    filename=doc_no,
+                    document_no=doc_no,
+                    version="1.0",
+                    effective_date="2026-10-25",
+                    objective="Qualification protocol execution.",
+                    scope="Full System Validation",
+                    title="Qualification Protocol Execution",
+                    steps=steps
+                )
+                sessions[session_id] = session
+
+    if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
 
     session = sessions[session_id]
@@ -917,13 +959,6 @@ def get_session_summary(session_id: str):
 
     overall_status = "PASS" if (failed_count == 0 and blocked_count == 0 and passed_count > 0) else ("FAIL" if failed_count > 0 else "BLOCKED")
     acceptance_criteria_met = (overall_status == "PASS")
-
-    failed_steps = [s for s in session.steps if s.status in ["FAIL", "BLOCKED"]]
-    deviation_ids = [f"DEV-{i+1:03d}" for i in range(len(failed_steps))]
-    root_cause_analyses = generate_ai_root_cause_analysis(session, failed_steps)
-    executive_summary = generate_ai_executive_summary(
-        session, overall_status, total_steps, passed_count, failed_count, blocked_count, failed_steps
-    )
 
     manifest_file = ARTIFACTS_DIR / "archive" / session_id / "manifest.sha256"
     manifest_sha = None
@@ -936,7 +971,40 @@ def get_session_summary(session_id: str):
         except Exception:
             pass
 
-    return ExecutionSummaryReport(
+    # Compute exact session-specific LLM metrics delta
+    start_u = session_start_llm_metrics.get(session_id)
+    cur_u = QwenLLMClient.get_total_usage()
+    if start_u:
+        session_llm_metrics = {
+            "total_calls": max(0, cur_u["total_calls"] - start_u.get("total_calls", 0)),
+            "prompt_tokens": max(0, cur_u["prompt_tokens"] - start_u.get("prompt_tokens", 0)),
+            "completion_tokens": max(0, cur_u["completion_tokens"] - start_u.get("completion_tokens", 0)),
+            "total_tokens": max(0, cur_u["total_tokens"] - start_u.get("total_tokens", 0)),
+            "model_used": cur_u.get("model_used", "Deterministic (0 LLM Calls)")
+        }
+    else:
+        session_llm_metrics = getattr(session, "llm_metrics", None) or cur_u
+    session.llm_metrics = session_llm_metrics
+
+    # Deduplicate & Cache Post-Execution Summary LLM Calls
+    status_sig = (passed_count, failed_count, blocked_count, overall_status)
+    if session_id in session_summary_cache:
+        cached_report, cached_sig = session_summary_cache[session_id]
+        if cached_sig == status_sig:
+            if manifest_sha:
+                cached_report.manifest_sha256 = manifest_sha
+                cached_report.archive_status = "ARCHIVED"
+            cached_report.llm_metrics = session_llm_metrics
+            return cached_report
+
+    failed_steps = [s for s in session.steps if s.status in ["FAIL", "BLOCKED"]]
+    deviation_ids = [f"DEV-{i+1:03d}" for i in range(len(failed_steps))]
+    root_cause_analyses = generate_ai_root_cause_analysis(session, failed_steps)
+    executive_summary = generate_ai_executive_summary(
+        session, overall_status, total_steps, passed_count, failed_count, blocked_count, failed_steps
+    )
+
+    report = ExecutionSummaryReport(
         session_id=session_id,
         document_no=session.document_no or session.filename,
         protocol_title=session.title or session.filename,
@@ -953,8 +1021,10 @@ def get_session_summary(session_id: str):
         executive_summary=executive_summary,
         archive_status="ARCHIVED" if manifest_file.exists() else "READY_FOR_ARCHIVE",
         manifest_sha256=manifest_sha,
-        llm_metrics=getattr(session, "llm_metrics", None) or QwenLLMClient.get_total_usage()
+        llm_metrics=session_llm_metrics
     )
+    session_summary_cache[session_id] = (report, status_sig)
+    return report
 
 @app.post("/api/generate-protocol")
 def generate_protocol(req: ProtocolGenerationRequest):
@@ -974,6 +1044,7 @@ def generate_protocol(req: ProtocolGenerationRequest):
 def author_direct_session(req: DirectProtocolAuthorRequest):
     session, docx_path = ProtocolGenerator.create_direct_session(req)
     sessions[session.session_id] = session
+    session_start_llm_metrics[session.session_id] = QwenLLMClient.get_total_usage()
     session_file_paths[session.session_id] = docx_path
     AuditTrailManager.log_event(
         session_id=session.session_id,

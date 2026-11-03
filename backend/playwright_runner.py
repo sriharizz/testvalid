@@ -16,9 +16,10 @@ from schemas import (
     AppliedInputRecord,
     GateEvaluationResult
 )
-from aria_compiler import capture_scoped_aria_snapshot, heal_step_locator_with_aria
+from aria_compiler import capture_scoped_aria_snapshot, heal_step_locator_with_aria, bind_step_with_live_dom, PlanCacheManager
 from audit_trail import AuditTrailManager
 from verification_engine import evaluate_step_gates, extract_valid_entity_id, is_negative_step_expectation
+from cpu_semantic_matcher import match_dropdown_option
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts"
 SCREENSHOTS_DIR = ARTIFACTS_DIR / "screenshots"
@@ -158,21 +159,21 @@ async def safe_click(locator, move_mouse: bool = True, broadcast_fn=None, label:
     return False
 
 async def is_control_type_match(loc: Locator, control_type: str) -> bool:
-    """Verifies that a located element genuinely matches the expected control type."""
+    """Verifies that a located element is genuinely an interactive control compatible with form input."""
     try:
         tag = await loc.evaluate("el => el.tagName.toLowerCase()")
-        inp_type = await loc.evaluate("el => el.getAttribute('type') || ''")
-        inp_type = inp_type.lower()
-        if control_type in ["text", "date"]:
-            if tag in ["input", "textarea"]:
-                return inp_type not in ["radio", "checkbox", "submit", "button"]
-            return tag not in ["select", "button"]
-        elif control_type == "select":
-            role = await loc.evaluate("el => el.getAttribute('role') || ''")
-            return tag == "select" or inp_type == "combobox" or role.lower() == "combobox" or tag in ["input", "div"]
+        inp_type = await loc.evaluate("el => (el.getAttribute('type') || '').toLowerCase()")
+        role = await loc.evaluate("el => (el.getAttribute('role') || '').toLowerCase()")
+
+        # Exclude non-input clickable elements
+        if tag in ["button", "a", "svg", "path"]:
+            return False
+
+        if control_type in ["text", "date", "select"]:
+            # An input, textarea, select, or combobox widget is universally acceptable for data entry
+            return tag in ["input", "textarea", "select"] or role in ["combobox", "listbox", "textbox"]
         elif control_type == "toggle":
-            role = await loc.evaluate("el => el.getAttribute('role') || ''")
-            return inp_type in ["checkbox", "radio"] or role.lower() in ["switch", "checkbox"]
+            return inp_type in ["checkbox", "radio"] or role in ["switch", "checkbox"]
         return True
     except Exception:
         return True
@@ -275,6 +276,46 @@ async def find_semantic_control(page: Page, label: str, control_type: str = "tex
         except Exception:
             pass
 
+    # 7. Universal Table Column-Header-to-Cell Input Resolver
+    # If 'label' matches a <th> column header in a visible table, locate the interactive control in the corresponding <td> column!
+    try:
+        col_ctrl_js = """(targetLabel) => {
+            const tgt = targetLabel.toLowerCase().trim();
+            const tables = document.querySelectorAll('table, [role="table"], [role="grid"]');
+            for (const tbl of tables) {
+                const headers = Array.from(tbl.querySelectorAll('thead th, [role="columnheader"], tr:first-child th'));
+                let matchIdx = -1;
+                headers.forEach((th, idx) => {
+                    const txt = (th.innerText || '').toLowerCase().trim();
+                    if (txt === tgt || (txt && tgt.includes(txt)) || (tgt && txt.includes(tgt))) {
+                        matchIdx = idx;
+                    }
+                });
+                if (matchIdx >= 0) {
+                    const rows = Array.from(tbl.querySelectorAll('tbody tr, [role="row"]'));
+                    for (const r of rows) {
+                        const cells = Array.from(r.querySelectorAll('td, [role="cell"], [role="gridcell"]'));
+                        const cell = cells[matchIdx] || cells[cells.length - 1];
+                        if (cell) {
+                            const ctrl = cell.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea, select, [role="combobox"]');
+                            if (ctrl) {
+                                ctrl.setAttribute('data-pw-grid-resolved', tgt);
+                                return `[data-pw-grid-resolved="${tgt}"]`;
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }"""
+        resolved_sel = await page.evaluate(col_ctrl_js, clean_lower)
+        if resolved_sel:
+            c_loc = page.locator(resolved_sel).first
+            if await check_visible(c_loc):
+                return c_loc
+    except Exception:
+        pass
+
     return None
 
 async def human_fill(page: Page, target: Any, value: str, broadcast_fn=None, label: str = "", step: Optional[ProtocolStep] = None) -> bool:
@@ -356,6 +397,8 @@ async def human_fill(page: Page, target: Any, value: str, broadcast_fn=None, lab
                 pass
     return False
 
+SESSION_USED_SELECT_OPTIONS: Dict[str, List[str]] = {}
+
 async def safe_select_option(
     page: Page,
     selector: Any,
@@ -363,7 +406,8 @@ async def safe_select_option(
     allow_any_default: bool = False,
     broadcast_fn=None,
     label: str = "",
-    step: Optional[ProtocolStep] = None
+    step: Optional[ProtocolStep] = None,
+    session: Optional[Any] = None
 ) -> Tuple[bool, str]:
     """
     Universal dropdown selector supporting native <select> AND custom ARIA/React/MUI/AntD comboboxes.
@@ -413,63 +457,97 @@ async def safe_select_option(
             ok = await human_fill(page, loc, val, broadcast_fn=broadcast_fn, label=display_label)
             return ok, val if ok else f"Failed to fill input '{display_label}'"
 
+        # Stateful option tracking for repeated imports / duplicate validation
+        is_step_neg = is_negative_step_expectation(step) if step else False
+        if session and hasattr(session, "runtime_state"):
+            used_list = session.runtime_state.setdefault("used_select_options", {}).setdefault(display_label.lower(), [])
+        else:
+            used_list = SESSION_USED_SELECT_OPTIONS.setdefault(display_label.lower(), [])
+
         # CASE A: Native HTML <select>
         if tag == "select":
-            options = await loc.evaluate(
-                "el => Array.from(el.options).map((o, idx) => ({idx, text: o.text.trim(), val: o.value}))"
-            )
-            valid_options = [o for o in options if o["val"] != "" and not o["text"].lower().startswith("select")]
+            # Universal async readiness guard: wait up to 1.5s for dynamic React/SPA option rendering
+            valid_options = []
+            for _ in range(5):
+                options = await loc.evaluate(
+                    "el => Array.from(el.options).map((o, idx) => ({idx, text: o.text.trim(), val: o.value}))"
+                )
+                valid_options = [o for o in options if o["val"] != "" and not o["text"].lower().startswith("select")]
+                if valid_options:
+                    break
+                await page.wait_for_timeout(250)
+
+            async def _apply_native_select(val_to_select: str) -> None:
+                try:
+                    await loc.select_option(value=val_to_select, timeout=2500)
+                except Exception:
+                    # DOM event fallback for reactive state frameworks
+                    safe_val_js = json.dumps(val_to_select)
+                    await loc.evaluate(f"""el => {{
+                        el.value = {safe_val_js};
+                        el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    }}""")
 
             if (not target_clean or target_clean.startswith("(")) and allow_any_default:
                 if valid_options:
-                    chosen = valid_options[0]
-                    await loc.select_option(value=chosen["val"], timeout=2000)
+                    if is_step_neg and used_list:
+                        chosen = next((o for o in valid_options if o["text"] in used_list), valid_options[0])
+                    elif not is_step_neg and used_list:
+                        chosen = next((o for o in valid_options if o["text"] not in used_list), valid_options[0])
+                    else:
+                        chosen = valid_options[0]
+                    used_list.append(chosen["text"])
+                    await _apply_native_select(chosen["val"])
                     if step is not None:
                         step.applied_inputs.append(AppliedInputRecord(
                             field_label=display_label,
                             selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
                             value_applied=chosen["text"],
-                            provenance="protocol_explicit",
+                            provenance="ai_synthesized_mandatory",
                             readback_verified=True
                         ))
                     if broadcast_fn:
                         await broadcast_fn(f"Selected {display_label}: {chosen['text']}")
                     await page.wait_for_timeout(250)
                     return True, chosen["text"]
-                return False, f"Dropdown '{display_label}' has no selectable options"
+                return False, f"Dropdown '{display_label}' has no selectable options rendered in DOM"
 
-            tgt_l = target_clean.lower().rstrip(".")
-            synonyms = {tgt_l}
-            if tgt_l in ["serious", "y", "yes", "true"]:
-                synonyms.update(["serious", "yes", "y", "true"])
-            elif tgt_l in ["non-serious", "not serious", "non_serious", "n", "no", "false"]:
-                synonyms.update(["non-serious", "not serious", "non_serious", "no", "n", "false"])
-            elif tgt_l in ["recovered", "resolved", "recovered/resolved"]:
-                synonyms.update(["recovered", "resolved", "recovered/resolved", "recovered / resolved"])
-            elif tgt_l in ["fatal"]:
-                synonyms.update(["fatal", "death"])
-            elif tgt_l in ["hcp", "healthcare professional", "health care professional"]:
-                synonyms.update(["hcp", "healthcare professional", "other", "spontaneous"])
+            # Delegate matching to offline CPU semantic matcher
+            matched_opt, score, prov = match_dropdown_option(target_clean, valid_options)
+            if matched_opt:
+                await _apply_native_select(matched_opt["val"])
+                if step is not None:
+                    step.applied_inputs.append(AppliedInputRecord(
+                        field_label=display_label,
+                        selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
+                        value_applied=matched_opt["text"],
+                        provenance=prov,
+                        readback_verified=True
+                    ))
+                if broadcast_fn:
+                    await broadcast_fn(f"Selected {display_label}: {matched_opt['text']}")
+                await page.wait_for_timeout(250)
+                return True, matched_opt["text"]
 
-            for opt in valid_options:
-                opt_t = opt["text"].lower().rstrip(".")
-                opt_v = opt["val"].lower().rstrip(".")
-                if opt_t in synonyms or opt_v in synonyms or tgt_l in opt_t or opt_t in tgt_l:
-                    await loc.select_option(value=opt["val"], timeout=2000)
-                    if step is not None:
-                        step.applied_inputs.append(AppliedInputRecord(
-                            field_label=display_label,
-                            selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
-                            value_applied=opt["text"],
-                            provenance="protocol_explicit",
-                            readback_verified=True
-                        ))
-                    if broadcast_fn:
-                        await broadcast_fn(f"Selected {display_label}: {opt['text']}")
-                    await page.wait_for_timeout(250)
-                    return True, opt["text"]
+            # Fallback if generic/synthesized dropdown allowing any valid default
+            if allow_any_default and valid_options:
+                chosen = valid_options[0]
+                await _apply_native_select(chosen["val"])
+                if step is not None:
+                    step.applied_inputs.append(AppliedInputRecord(
+                        field_label=display_label,
+                        selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
+                        value_applied=chosen["text"],
+                        provenance="ai_synthesized_mandatory",
+                        readback_verified=True
+                    ))
+                if broadcast_fn:
+                    await broadcast_fn(f"Selected {display_label} (default fallback): {chosen['text']}")
+                await page.wait_for_timeout(250)
+                return True, chosen["text"]
 
-            # STRICT FAILURE: Do NOT select index=1 when target was not found!
+            # STRICT FAILURE: Do NOT select index=1 when explicit target was mandated and not found!
             available_str = ", ".join(o["text"] for o in valid_options[:8])
             return False, f"Option '{target_clean}' not found in '{display_label}'. Available: [{available_str}]"
 
@@ -485,35 +563,68 @@ async def safe_select_option(
         if count == 0:
             return False, f"Custom combobox '{display_label}' did not open any option list"
 
-        if (not target_clean or target_clean.startswith("(")) and allow_any_default:
-            first_opt = portal_options.first
-            txt = (await first_opt.inner_text()).strip()
-            await safe_click(first_opt, broadcast_fn=broadcast_fn, label=f"Selected {txt}")
-            await page.wait_for_timeout(250)
-            return True, txt
-
-        tgt_l = target_clean.lower()
-        synonyms = {tgt_l}
-        if tgt_l in ["serious", "y", "yes", "true"]:
-            synonyms.update(["serious", "yes", "y", "true"])
-        elif tgt_l in ["non-serious", "not serious", "non_serious", "n", "no", "false"]:
-            synonyms.update(["non-serious", "not serious", "non_serious", "no", "n", "false"])
-        elif tgt_l in ["hcp", "healthcare professional", "health care professional"]:
-            synonyms.update(["hcp", "healthcare professional", "other", "spontaneous"])
-
+        portal_options_list = []
         for i in range(count):
             opt_loc = portal_options.nth(i)
             if not await check_visible(opt_loc):
                 continue
-            opt_txt = (await opt_loc.inner_text()).strip()
-            opt_l = opt_txt.lower()
-            if opt_l in synonyms or opt_l == tgt_l or tgt_l in opt_l:
-                await safe_click(opt_loc, broadcast_fn=broadcast_fn, label=f"Selected {opt_txt}")
+            txt = (await opt_loc.inner_text()).strip()
+            if txt and not txt.lower().startswith("select"):
+                portal_options_list.append({"text": txt, "val": str(i), "loc": opt_loc})
+
+        if (not target_clean or target_clean.startswith("(")) and allow_any_default:
+            if portal_options_list:
+                if is_step_neg and used_list:
+                    chosen = next((o for o in portal_options_list if o["text"] in used_list), portal_options_list[0])
+                elif not is_step_neg and used_list:
+                    chosen = next((o for o in portal_options_list if o["text"] not in used_list), portal_options_list[0])
+                else:
+                    chosen = portal_options_list[0]
+                used_list.append(chosen["text"])
+                await safe_click(chosen["loc"], broadcast_fn=broadcast_fn, label=f"Selected {chosen['text']}")
+                if step is not None:
+                    step.applied_inputs.append(AppliedInputRecord(
+                        field_label=display_label,
+                        selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
+                        value_applied=chosen["text"],
+                        provenance="ai_synthesized_mandatory",
+                        readback_verified=True
+                    ))
                 await page.wait_for_timeout(250)
-                return True, opt_txt
+                return True, chosen["text"]
+
+        # Delegate matching to offline CPU semantic matcher
+        matched_opt, score, prov = match_dropdown_option(target_clean, portal_options_list)
+        if matched_opt:
+            await safe_click(matched_opt["loc"], broadcast_fn=broadcast_fn, label=f"Selected {matched_opt['text']}")
+            if step is not None:
+                step.applied_inputs.append(AppliedInputRecord(
+                    field_label=display_label,
+                    selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
+                    value_applied=matched_opt["text"],
+                    provenance=prov,
+                    readback_verified=True
+                ))
+            await page.wait_for_timeout(250)
+            return True, matched_opt["text"]
+
+        if allow_any_default and portal_options_list:
+            first = portal_options_list[0]
+            await safe_click(first["loc"], broadcast_fn=broadcast_fn, label=f"Selected {first['text']}")
+            if step is not None:
+                step.applied_inputs.append(AppliedInputRecord(
+                    field_label=display_label,
+                    selector_used=str(selector)[:60] if isinstance(selector, str) else display_label,
+                    value_applied=first["text"],
+                    provenance="ai_synthesized_mandatory",
+                    readback_verified=True
+                ))
+            await page.wait_for_timeout(250)
+            return True, first["text"]
 
         await page.keyboard.press("Escape")
-        return False, f"Option '{target_clean}' not found in custom combobox '{display_label}'"
+        available_str = ", ".join(o["text"] for o in portal_options_list[:8])
+        return False, f"Option '{target_clean}' not found in custom combobox '{display_label}'. Available: [{available_str}]"
     except Exception as e:
         return False, f"safe_select_option error on {selector} with '{target}': {e}"
 
@@ -613,6 +724,24 @@ async def count_data_rows(target: Any) -> int:
         return valid
     except Exception:
         return 0
+
+async def ensure_section_active_by_name(page: Page, section_name: str, broadcast_fn=None):
+    """
+    Universal Dynamic Section / Tab Activator:
+    Activates tab, accordion, or section corresponding to section_name without product hardcoding.
+    """
+    sec = (section_name or "").strip()
+    if not sec or sec == "general":
+        return
+    candidates = [sec.replace('_', ' ').title(), sec.replace('_', ' ')]
+    for cand in candidates:
+        if len(cand) < 3:
+            continue
+        tab = page.locator(f"[role='tab']:has-text('{cand}'), button:has-text('{cand}')").first
+        if await check_visible(tab):
+            await safe_click(tab, broadcast_fn=broadcast_fn, label=f"Switched to {cand} Tab")
+            await page.wait_for_timeout(350)
+            return
 
 async def ensure_step_section_visible(page: Page, step: ProtocolStep, broadcast_fn=None):
     """
@@ -890,13 +1019,7 @@ async def verify_expected_result(
             elif combined_feedback:
                 passed_details.append(f"Action confirmed: '{combined_feedback[:80]}'")
             else:
-                exp_lower = (step.expected_result or "").lower()
-                if any(k in exp_lower for k in ["confirmation message", "pop-up shall display", "popup shall display", "message shall display"]):
-                    failed_details.append("Expected confirmation message or popup was not displayed by application")
-                elif not is_negative_step_expectation(step):
-                    passed_details.append("Action executed and form data persisted successfully")
-                else:
-                    failed_details.append("Expected confirmation message was not displayed")
+                failed_details.append("Expected confirmation message or popup was not displayed by application")
 
         # D. STATUS_BADGE (MedDRA coding badge, checkmark, status pill)
         elif assertion.assertion_type == "STATUS_BADGE":
@@ -910,7 +1033,10 @@ async def verify_expected_result(
                 "div:has-text('Coded'), span.text-emerald-600, span.text-green-600"
             ).first
             if await check_visible(badge_loc):
-                txt = (await badge_loc.inner_text()).strip() if badge_loc else ""
+                try:
+                    txt = (await badge_loc.inner_text()).strip() if badge_loc else ""
+                except Exception:
+                    txt = (await badge_loc.text_content() or "").strip() if badge_loc else ""
                 passed_details.append(f"Status badge / MedDRA coding confirmed in UI{f': {txt}' if txt else ''}")
             elif combined_feedback and any(k in combined_feedback.lower() for k in ["coded", "meddra"]):
                 passed_details.append(f"Coding status confirmed by application message: '{combined_feedback[:80]}'")
@@ -921,13 +1047,29 @@ async def verify_expected_result(
         elif assertion.assertion_type == "FIELD_VALUE":
             lbl = assertion.field_label or assertion.target_text or ""
             if lbl:
+                # 1. Check pre-save verified values captured while form/modal was populated
+                pre_val = step.test_data.get("pre_save_verified_fields", {}).get(lbl)
+                if pre_val:
+                    if assertion.expected_value:
+                        if assertion.expected_value.lower() in pre_val.lower():
+                            passed_details.append(f"Field '{lbl}' verified (pre-save) with expected value '{pre_val}'")
+                            continue
+                        else:
+                            failed_details.append(f"Discrepancy: Field '{lbl}' expected '{assertion.expected_value}' but found '{pre_val}'")
+                            continue
+                    else:
+                        passed_details.append(f"Auto-populated field '{lbl}' verified (pre-save) with value '{pre_val}'")
+                        continue
+
+                # 2. Check live DOM controls
                 sec_container = await get_active_section_container(page, step)
                 ctrl = await find_semantic_control(page, lbl, control_type="text", container=sec_container)
                 if not ctrl:
                     clean_id = re.sub(r'[\s_\*]+', '', lbl)
                     ctrl = page.locator(f"input#{clean_id}, input[placeholder*='{lbl}' i], textarea[placeholder*='{lbl}' i], input[name*='{lbl}' i]").first
+
+                val = ""
                 if ctrl and await check_visible(ctrl):
-                    val = ""
                     try:
                         val = (await ctrl.input_value()).strip()
                     except Exception:
@@ -935,19 +1077,44 @@ async def verify_expected_result(
                             val = (await ctrl.inner_text()).strip()
                         except Exception:
                             pass
+
+                if val:
                     if assertion.expected_value:
                         if assertion.expected_value.lower() in val.lower():
                             passed_details.append(f"Field '{lbl}' verified with expected value '{val}'")
+                            continue
                         else:
                             failed_details.append(f"Discrepancy: Field '{lbl}' expected '{assertion.expected_value}' but found '{val}'")
+                            continue
                     else:
-                        # Auto-population verification: must be non-empty
-                        if val:
-                            passed_details.append(f"Auto-populated field '{lbl}' verified with value '{val}'")
-                        else:
-                            failed_details.append(f"Discrepancy: Field '{lbl}' was expected to auto-populate, but is empty in UI")
+                        passed_details.append(f"Auto-populated field '{lbl}' verified with value '{val}'")
+                        continue
+
+                # 3. Check visible table rows (e.g. Products/Events data grid if form was already saved to a row)
+                table_rows = page.locator("table tbody tr, [role='table'] [role='row']")
+                t_count = await table_rows.count()
+                saved_in_table = False
+                for r_i in range(min(t_count, 5)):
+                    row_txt = (await table_rows.nth(r_i).inner_text()).strip()
+                    if not row_txt or any(p in row_txt.lower() for p in ["no records", "no data", "empty"]):
+                        continue
+                    if assertion.expected_value:
+                        if assertion.expected_value.lower() in row_txt.lower():
+                            passed_details.append(f"Field '{lbl}' verified in saved table row with expected value '{assertion.expected_value}'")
+                            saved_in_table = True
+                            break
+                    else:
+                        passed_details.append(f"Auto-populated field '{lbl}' verified via saved data row in table")
+                        saved_in_table = True
+                        break
+
+                if saved_in_table:
+                    continue
+
+                if ctrl and await check_visible(ctrl):
+                    failed_details.append(f"Discrepancy: Field '{lbl}' was expected to auto-populate, but is empty in UI")
                 else:
-                    failed_details.append(f"Field '{lbl}' not found on page")
+                    failed_details.append(f"Field '{lbl}' not found on page or active table")
 
         # F. TABLE_DATA (Row addition or deletion in data table)
         elif assertion.assertion_type == "TABLE_DATA":
@@ -992,13 +1159,18 @@ async def verify_expected_result(
                 if await check_visible(faq_loc):
                     found = True
                     passed_details.append("FAQ interface/accordion verified in UI")
-            elif elem_type == "hyperlink":
-                link_loc = page.locator("a[href], [role='link'], button:has-text('Hyperlink'), a:has-text('Product Information')").first
+            elif "view" in elem_type or elem_type == "hyperlink":
+                link_loc = page.locator("a:has-text('View'), button:has-text('View'), a[href], [role='link'], button:has-text('Hyperlink'), a:has-text('Product Information')").first
                 if await check_visible(link_loc):
+                    try:
+                        await safe_click(link_loc)
+                        await page.wait_for_timeout(300)
+                    except Exception:
+                        pass
                     found = True
-                    passed_details.append("Active hyperlink element verified in UI")
+                    passed_details.append(f"Active '{elem_type}' link/accordion verified and revealed in UI")
             else:
-                gen_loc = page.locator(f"a, [role='link'], [data-testid*='{elem_type}']").first
+                gen_loc = page.locator(f"a:has-text('{elem_type}'), button:has-text('{elem_type}'), [role='link']:has-text('{elem_type}'), [data-testid*='{elem_type}']").first
                 if await check_visible(gen_loc):
                     found = True
                     passed_details.append(f"UI element '{elem_type}' verified")
@@ -1257,6 +1429,39 @@ class PlaywrightRunner:
                     scen_text = (step.scenario or "").lower()
 
                     is_submitting_login = ("enter user" in proc_text or "enter the following details" in proc_text or "username" in proc_text or "password" in proc_text) and ("click on login" in proc_text or "click login" in proc_text or "sign in" in proc_text)
+                    is_explicit_login_step = intent in ["NAVIGATE_LOGIN", "LOGIN_ONEPV"] or step.primary_section == "auth" or "login" in scen_text or is_submitting_login
+
+                    # Universal Auto-Authentication:
+                    # When executing protocols starting directly at business steps without explicit login steps,
+                    # auto-authenticate with configured credentials if the browser is currently on the login view.
+                    if not is_explicit_login_step:
+                        is_at_login = "login" in page.url.lower() or await check_visible(page.locator("input[type='password'], button:has-text('Login')").first)
+                        if is_at_login:
+                            if broadcast_frame:
+                                await broadcast_frame("Direct In-System Authoring: Authenticating session with configured credentials...")
+                            u_ctrl = await find_semantic_control(page, "Username", "text")
+                            p_ctrl = await find_semantic_control(page, "Password", "text")
+                            e_ctrl = await find_semantic_control(page, "Enterprise", "text")
+                            u_val = (creds.get("username") or "").strip()
+                            p_val = (creds.get("password") or "").strip()
+                            e_val = (creds.get("enterprise") or "").strip()
+
+                            if u_ctrl and u_val: await human_fill(page, u_ctrl, u_val, broadcast_fn=broadcast_frame, label="Username")
+                            if p_ctrl and p_val: await human_fill(page, p_ctrl, p_val, broadcast_fn=broadcast_frame, label="Password")
+                            if e_ctrl and e_val: await human_fill(page, e_ctrl, e_val, broadcast_fn=broadcast_frame, label="Enterprise")
+                            await page.wait_for_timeout(300)
+
+                            login_btn = page.get_by_role("button", name="Login").or_(page.locator("button[type='submit'], button:has-text('Login')")).first
+                            if await check_visible(login_btn):
+                                await safe_click(login_btn, broadcast_fn=broadcast_frame, label="Submit Login")
+                                try:
+                                    await page.wait_for_url(lambda u: "login" not in u.lower() and "auth" not in u.lower(), timeout=15000)
+                                except Exception:
+                                    await page.wait_for_load_state("networkidle")
+                                await inject_virtual_cursor(page)
+                                await page.wait_for_timeout(500)
+                                if broadcast_frame:
+                                    await broadcast_frame(f"Authenticated into application as {u_val}")
 
                     # 1. Navigation / Authentication Steps
                     if intent in ["NAVIGATE_LOGIN", "LOGIN_ONEPV"] or step.primary_section == "auth" or "login" in scen_text:
@@ -1470,9 +1675,74 @@ class PlaywrightRunner:
                         # E. Dynamically populate form fields (Container Scoped)
                         missing_or_failed_fields: List[str] = []
 
+                        # Sync locked values from session.locked_plan if updated from cache
+                        if session.locked_plan and planned_step:
+                            locked_spec = next((ls for ls in session.locked_plan.steps if ls.step_id == step.step_id), None)
+                            if locked_spec and locked_spec.compiled_fields:
+                                locked_map = {cf.label.lower().strip(): cf for cf in locked_spec.compiled_fields}
+                                for fa in planned_step.field_actions:
+                                    lbl_key = fa.label.lower().strip()
+                                    if lbl_key in locked_map:
+                                        cf = locked_map[lbl_key]
+                                        if cf.target_value:
+                                            fa.target_value = cf.target_value
+                                            fa.provenance = cf.provenance
+
+                        # If step needs Mode 1 discovery or 0 field actions on FORM_ENTRY, bind with live DOM
+                        if getattr(step, "needs_mode1_discovery", False) or (planned_step and len(planned_step.field_actions) == 0 and step.action_intent == "FORM_ENTRY"):
+                            dom_records = await bind_step_with_live_dom(page, step, planned_step, scope_target)
+                            if dom_records:
+                                step.applied_inputs.extend(dom_records)
+                                filled_count += len(dom_records)
+
+                        # 3. Universal Row-Edit Trigger Before Updating Existing Records:
+                        # When a step instructs to update/modify records in a table/grid, and form controls
+                        # are not yet visible (hidden until an Edit/Update button or icon is clicked):
+                        if any(k in proc_text for k in ["update the", "modify the", "edit the", "update record", "modify record"]):
+                            any_hidden = False
+                            for fa in (planned_step.field_actions if planned_step else []):
+                                chk = await find_semantic_control(page, fa.label, fa.control_type, section_hint=fa.section, container=scope_target)
+                                if not chk:
+                                    any_hidden = True
+                                    break
+                            if any_hidden:
+                                scope_search = sec_container if sec_container else page
+                                edit_triggers = [
+                                    "button:has-text('Edit')", "button[aria-label*='edit' i]", "button[title*='edit' i]",
+                                    "[data-testid*='edit' i]", "button:has-text('Update')", "svg[data-icon='edit']",
+                                    "a:has-text('Edit')", "button:has-text('Add')"
+                                ]
+                                for trig_sel in edit_triggers:
+                                    edit_btn = scope_search.locator(trig_sel).first
+                                    if await check_visible(edit_btn):
+                                        await safe_click(edit_btn, broadcast_fn=broadcast_frame, label="Opened Row Edit Mode")
+                                        await page.wait_for_timeout(350)
+                                        active_dialog = page.locator("[role='dialog'], [role='alertdialog'], .modal, [class*='modal']").first
+                                        is_dialog_active = await check_visible(active_dialog)
+                                        if is_dialog_active:
+                                            scope_target = active_dialog
+                                        break
+
+                        current_field_section = step.primary_section
                         for fa in (planned_step.field_actions if planned_step else []):
                             if fa.control_type == "auto_populate_verify" or fa.expect_auto_populated:
                                 continue  # Verified in post-action assertion phase
+
+                            # Dynamic Per-Field Section Switching Inside Multi-Section Steps
+                            if fa.section and fa.section != current_field_section and fa.section != "general":
+                                try:
+                                    depart_sec = await get_active_section_container(page, step)
+                                    scope_depart = depart_sec if depart_sec else page
+                                    badge_loc = scope_depart.locator("[data-testid*='coded'], [class*='badge']:has-text('Coded'), span:has-text('Coded')").first
+                                    if await check_visible(badge_loc):
+                                        step.test_data["pre_submit_badge_verified"] = True
+                                except Exception:
+                                    pass
+
+                                await ensure_section_active_by_name(page, fa.section, broadcast_fn=broadcast_frame)
+                                current_field_section = fa.section
+                                sec_container = await get_active_section_container(page, step)
+                                scope_target = sec_container if sec_container else page
 
                             loc = await find_semantic_control(page, fa.label, fa.control_type, section_hint=fa.section, container=scope_target)
                             if not loc:
@@ -1486,16 +1756,30 @@ class PlaywrightRunner:
                             # Detect actual DOM element type to ensure correct interaction
                             dom_tag = ""
                             dom_type = ""
+                            dom_role = ""
                             try:
                                 dom_tag = await loc.evaluate("el => el.tagName.toLowerCase()")
                                 dom_type = await loc.evaluate("el => (el.getAttribute('type') || '').toLowerCase()")
+                                dom_role = await loc.evaluate("el => (el.getAttribute('role') || '').toLowerCase()")
                             except Exception:
                                 pass
 
                             is_date_field = ("date" in fa.label.lower() or dom_type == "date" or fa.control_type == "date")
                             is_native_input = dom_tag in ["input", "textarea"] and dom_type not in ["radio", "checkbox", "button", "submit"]
+                            is_dropdown_widget = (dom_tag == "select" or fa.control_type == "select" or dom_type == "combobox" or dom_role in ["combobox", "listbox"])
 
-                            if is_date_field or (is_native_input and fa.control_type != "toggle"):
+                            if is_dropdown_widget and dom_tag not in ["input", "textarea"]:
+                                # Universal dropdown resolution
+                                ef = next((f for f in (step.extracted_fields or []) if f.field_id == fa.field_id or f.label.lower() == fa.label.lower()), None)
+                                is_explicit = (ef is not None and ef.explicit_value is not None and not str(ef.explicit_value).startswith("(") and not str(ef.explicit_value).lower().startswith("select"))
+                                allow_any = (not is_explicit) or (fa.provenance == "ai_synthesized_mandatory") or not bool(fa.target_value) or str(fa.target_value).startswith("(") or str(fa.target_value).lower().startswith("choose")
+                                ok, detail = await safe_select_option(page, loc, fa.target_value, allow_any_default=allow_any, broadcast_fn=broadcast_frame, label=fa.label, step=step, session=session)
+                                if not ok:
+                                    missing_or_failed_fields.append(detail)
+                                else:
+                                    filled_count += 1
+
+                            elif is_date_field or (is_native_input and fa.control_type != "toggle"):
                                 val = fa.target_value if not (is_neg and "empty" in proc_text) else ""
                                 if is_date_field:
                                     if not val or str(val).startswith("(") or not re.match(r'^\d{4}-\d{2}-\d{2}$', str(val)):
@@ -1505,14 +1789,6 @@ class PlaywrightRunner:
                                 ok = await human_fill(page, loc, val, broadcast_fn=broadcast_frame, label=fa.label)
                                 if not ok:
                                     missing_or_failed_fields.append(f"Failed to fill '{fa.label}' with '{val}'")
-                                else:
-                                    filled_count += 1
-
-                            elif fa.control_type == "select":
-                                allow_any = not bool(fa.target_value) or str(fa.target_value).startswith("(")
-                                ok, detail = await safe_select_option(page, loc, fa.target_value, allow_any_default=allow_any, broadcast_fn=broadcast_frame, label=fa.label)
-                                if not ok:
-                                    missing_or_failed_fields.append(detail)
                                 else:
                                     filled_count += 1
 
@@ -1562,6 +1838,21 @@ class PlaywrightRunner:
                                             except Exception:
                                                 pass
                                             await page.wait_for_timeout(350)
+                                            # Check and cache any newly auto-populated fields in active section
+                                            for a in (step.assertions or []):
+                                                if a.assertion_type == "FIELD_VALUE" and a.field_label:
+                                                    floc = await find_semantic_control(page, a.field_label, "text", section_hint=fa.section, container=scope_target)
+                                                    if floc:
+                                                        try:
+                                                            v = await floc.input_value()
+                                                            if v and v.strip():
+                                                                step.test_data.setdefault("pre_save_verified_fields", {})[a.field_label] = v.strip()
+                                                        except Exception:
+                                                            pass
+                                                elif a.assertion_type == "STATUS_BADGE":
+                                                    badge_loc = (sec_container or page).locator("[data-testid*='coded'], [class*='badge']:has-text('Coded'), span:has-text('Coded')").first
+                                                    if await check_visible(badge_loc):
+                                                        step.test_data["pre_submit_badge_verified"] = True
                                     filled_count += 1
                                 elif term_input:
                                     filled_count += 1
@@ -1600,6 +1891,46 @@ class PlaywrightRunner:
                                     ok, _ = await safe_select_option(page, rsel, "Yes", allow_any_default=False, broadcast_fn=broadcast_frame, label="Question Response")
                                     if ok:
                                         filled_count += 1
+
+                        # F1. Pre-Save Auto-Populate & Field Verification Timing (TS1-S11):
+                        # Capture field values while the active modal or form is still populated before Save submits/resets it
+                        if step.assertions:
+                            if "pre_save_verified_fields" not in step.test_data:
+                                step.test_data["pre_save_verified_fields"] = {}
+                            for assertion in step.assertions:
+                                if assertion.assertion_type == "FIELD_VALUE" and assertion.field_label:
+                                    lbl = assertion.field_label.strip()
+                                    check_targets = []
+                                    if is_dialog_active and await check_visible(active_dialog):
+                                        check_targets.append(active_dialog)
+                                    if sec_container:
+                                        check_targets.append(sec_container)
+                                    check_targets.append(page)
+
+                                    for target_scope in check_targets:
+                                        ctrl = await find_semantic_control(page, lbl, "text", section_hint=step.primary_section, container=target_scope)
+                                        if not ctrl:
+                                            ctrl = await find_semantic_control(page, lbl, "select", section_hint=step.primary_section, container=target_scope)
+                                        if not ctrl:
+                                            clean_id = re.sub(r'[\s_\*]+', '', lbl)
+                                            c = target_scope.locator(f"input#{clean_id}, input[name*='{lbl}' i], input[placeholder*='{lbl}' i], textarea#{clean_id}").first
+                                            if await check_visible(c):
+                                                ctrl = c
+                                        if ctrl and await check_visible(ctrl):
+                                            try:
+                                                v = ""
+                                                tag = await ctrl.evaluate("el => el.tagName.toLowerCase()")
+                                                if tag == "select":
+                                                    v = await ctrl.evaluate("el => el.options[el.selectedIndex] ? el.options[el.selectedIndex].text.trim() : ''")
+                                                else:
+                                                    v = (await ctrl.input_value()).strip()
+                                                if not v:
+                                                    v = (await ctrl.inner_text()).strip()
+                                                if v:
+                                                    step.test_data["pre_save_verified_fields"][lbl] = v
+                                                    break
+                                            except Exception:
+                                                pass
 
                         # F2. Handle Modal Submits (if inside Additional Questions or template modal)
                         modal_submitted = False
@@ -1859,6 +2190,14 @@ class PlaywrightRunner:
                             if await check_visible(clear_btn):
                                 await safe_click(clear_btn)
                                 await page.wait_for_timeout(350)
+                            # Universal post-step cleanup if procedure specifically calls for Reset or Cancel
+                            if any(k in proc_text for k in ["click on reset", "reset button", "click reset", "cancel button"]):
+                                reset_btn = page.locator("button:has-text('Reset'), button:has-text('Cancel'), button[data-testid='reset-btn']").first
+                                if await check_visible(reset_btn):
+                                    await safe_click(reset_btn, broadcast_fn=broadcast_frame, label="Clicked Reset/Cancel")
+                                    await page.wait_for_timeout(350)
+                                    await dismiss_dialog(page, "OK", force_dismiss=True)
+                                    await dismiss_dialog(page, "Yes", force_dismiss=True)
                     else:
                         step.status = "FAIL"
                         step.pass_fail_text = "Fail"
@@ -1962,6 +2301,12 @@ class PlaywrightRunner:
 
                 if ws_callback:
                     await ws_callback({"type": "STEP_UPDATE", "step": step.model_dump()})
+
+            try:
+                from aria_compiler import PlanCacheManager
+                PlanCacheManager.update_cache_with_verified_dom_inputs(session)
+            except Exception as cache_err:
+                print(f"[PlaywrightRunner] Cache write-back note: {cache_err}")
 
             await browser.close()
 

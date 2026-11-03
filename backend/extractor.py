@@ -4,7 +4,7 @@ import uuid
 import docx
 import subprocess
 import hashlib
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Literal
 from pathlib import Path
 from schemas import (
     ProtocolStep,
@@ -17,7 +17,8 @@ from schemas import (
     TraceStage,
     TableColumnMap,
     StepAssertion,
-    AssertionType
+    AssertionType,
+    StepCheckpoint
 )
 
 def get_git_commit_sha(file_path: Optional[str] = None) -> str:
@@ -278,15 +279,40 @@ def extract_fields_from_procedure(step_id: str, primary_section: SectionType, pr
         line = lines[i]
         line_l = line.lower()
         
-        # 1. Dynamic Section Boundary Detection (Universal)
-        sec_match = re.search(r'^(?:under|in)\s+([A-Za-z0-9\s/&-]{2,30}?)(?:\s+(?:section|tab|page|column|card|sub-section))?[\:\.\,]?$', line, re.IGNORECASE)
-        if sec_match:
-            sec_name = sec_match.group(1).strip()
-            if sec_name.lower() not in ["left menu", "homepage", "the following", "browser", "validation", "below dropdowns", "response column"]:
-                current_section = re.sub(r'[^a-zA-Z0-9]+', '_', sec_name.lower()).strip('_')
-                i += 1
-                continue
-            
+        # 1. Universal Section-Switch & Instructional Directive Filter
+        # Matches any sentence of the form: "(Under|In|On|Go to) <Section Name> [section|tab|page] [enter|update|fill|select ...]"
+        directive_match = re.match(
+            r'^(?:under|in|on|go\s+to|navigate\s+to)\s+(?:the\s+)?([A-Za-z0-9\s/&-]{2,45}?)(?:\s+(?:section|tab|page|screen|panel|card|sub-section|grid|table))?(?:\s+(?:enter|update|fill|select|verify|provide|input|complete)\b.*)?[\:\.\,]?$',
+            line,
+            re.IGNORECASE
+        )
+        is_meta_directive = any(
+            re.search(pat, line_l) for pat in [
+                r'\b(?:enter|update|fill|select|provide)\s+(?:the\s+)?(?:below|following)\s+(?:details|fields|data|values|information)\b',
+                r'\b(?:enter|update|fill)\s+(?:the\s+)?data\s+in\s+(?:the\s+)?(?:below|following)\b',
+                r'^\s*\(\s*refer\s+expected\s+result',
+                r'^\s*note\s*:'
+            ]
+        )
+        if directive_match or is_meta_directive:
+            if directive_match:
+                cand_sec = directive_match.group(1).strip()
+                # Strip trailing directive verbs/nouns if captured inside group 1
+                cand_sec = re.sub(
+                    r'\s+(?:section|tab|page|screen|panel|enter|update|fill|select|the|below|following|details|fields|data).*$',
+                    '',
+                    cand_sec,
+                    flags=re.IGNORECASE
+                ).strip()
+                generic_containers = {
+                    "left menu", "homepage", "the following", "browser", "validation",
+                    "below dropdowns", "response column", "below fields", "below details"
+                }
+                if cand_sec and cand_sec.lower() not in generic_containers and len(cand_sec) <= 35:
+                    current_section = re.sub(r'[^a-zA-Z0-9]+', '_', cand_sec.lower()).strip('_')
+            i += 1
+            continue
+
         # 2. Prose / Grid Field Handler (e.g. response column / inline input)
         if "under response column" in line_l or ("enter the response" in line_l and "question" in line_l):
             field_counter += 1
@@ -308,12 +334,20 @@ def extract_fields_from_procedure(step_id: str, primary_section: SectionType, pr
             rest = field_match.group(2).strip()
             lc = label_candidate.lower()
             
-            # Filter non-field instructional headers
-            if lc in [
-                "scenario", "steps to be followed", "note", "step", "url",
-                "http", "https", "click on", "refer expected result", "below dropdowns",
-                "select value for below dropdowns", "select value for"
-            ] or lc.startswith("click on") or lc.startswith("click the") or "steps to be followed" in lc:
+            # Guard against long sentence clauses and non-field instructional headers
+            if (
+                len(label_candidate) > 42
+                or len(label_candidate.split()) > 6
+                or re.search(r'\b(enter|update|fill|click|navigate|refer|below|following|section|page)\b', lc)
+                or lc in [
+                    "scenario", "steps to be followed", "note", "step", "url",
+                    "http", "https", "click on", "refer expected result", "below dropdowns",
+                    "select value for below dropdowns", "select value for"
+                ]
+                or lc.startswith("click on")
+                or lc.startswith("click the")
+                or "steps to be followed" in lc
+            ):
                 i += 1
                 continue
 
@@ -358,9 +392,9 @@ def extract_fields_from_procedure(step_id: str, primary_section: SectionType, pr
                 auto_pop = True
             elif "toggle" in inst_l or "switch" in inst_l:
                 ctrl_type = "toggle"
-            elif "date" in lbl_l or "birth" in lbl_l or "calendar" in inst_l or "timestamp" in inst_l:
+            elif "date" in lbl_l or "birth" in lbl_l or "dob" in lbl_l or "date" in inst_l or "calendar" in inst_l or "timestamp" in inst_l:
                 ctrl_type = "date"
-            elif "dropdown" in inst_l or "select from" in inst_l or "choose" in inst_l or "select" in inst_l or "assessment" in current_section or "seriousness" in current_section:
+            elif any(k in inst_l for k in ["dropdown", "select from", "choose", "value from dropdown", "from dropdown"]) or "select" in inst_l or "assessment" in current_section or "seriousness" in current_section:
                 ctrl_type = "select"
             else:
                 ctrl_type = "text"
@@ -378,6 +412,58 @@ def extract_fields_from_procedure(step_id: str, primary_section: SectionType, pr
             ))
             i += 1
             continue
+
+        # 4. Universal Two-Line Colon-Less Field Pattern:
+        # Line i: Short noun-phrase field label (no colon, <= 5 words)
+        # Line i+1: Parenthetical instruction e.g. "(Enter the data)", "(Update the date)", "(Select from dropdown)"
+        if ":" not in line and i + 1 < len(lines):
+            next_line = lines[i + 1].strip()
+            is_parenthetical_inst = (
+                next_line.startswith("(")
+                and next_line.endswith(")")
+                and "refer expected" not in next_line.lower()
+                and "µ" not in next_line
+            )
+            is_valid_field_noun = (
+                re.match(r'^[A-Za-z][A-Za-z0-9\s/&\-\(\)]{1,35}$', line) is not None
+                and len(line.split()) <= 5
+                and not re.match(r'^(?:click|open|navigate|from|in|under|on|directly|verify|check|press|note)\b', line_l)
+            )
+            if is_parenthetical_inst and is_valid_field_noun:
+                label = line.strip()
+                raw_inst = next_line
+                inst_l = raw_inst.lower()
+                lbl_l = label.lower()
+
+                ctrl_type: ControlType = "text"
+                search_trigger = False
+                auto_pop = False
+                if "search icon" in inst_l or ("search" in inst_l and ("select" in inst_l or "modal" in inst_l)):
+                    ctrl_type = "modal_search_select"
+                    search_trigger = True
+                elif "auto-populate" in inst_l or "auto populate" in inst_l:
+                    ctrl_type = "auto_populate_verify"
+                    auto_pop = True
+                elif "toggle" in inst_l or "switch" in inst_l:
+                    ctrl_type = "toggle"
+                elif any(k in inst_l for k in ["dropdown", "select from", "choose", "value from dropdown", "from dropdown"]):
+                    ctrl_type = "select"
+                elif "date" in lbl_l or "birth" in lbl_l or "dob" in lbl_l or bool(re.search(r'\bdate\b', inst_l)) or "calendar" in inst_l:
+                    ctrl_type = "date"
+
+                field_counter += 1
+                extracted_fields.append(ExtractedFieldSpec(
+                    field_id=f"{step_id}-F{field_counter:02d}",
+                    section=current_section,
+                    label=label,
+                    raw_instruction=raw_inst,
+                    control_type=ctrl_type,
+                    explicit_value=None,
+                    search_trigger_icon=search_trigger,
+                    auto_populated=auto_pop
+                ))
+                i += 2
+                continue
             
         i += 1
         
@@ -578,6 +664,70 @@ def score_step_parseability(procedure_text: str, extracted_fields: List[Extracte
 
     return 1.0, False
 
+def classify_segment_polarity(expected_segment: str) -> Literal["POSITIVE", "NEGATIVE"]:
+    low = (expected_segment or "").lower()
+    neg_terms = [
+        "error message", "validation error", "shall not allow", "cannot ", "must not",
+        "block", "prevent", "reject", "invalid", "mandatory", "required field"
+    ]
+    pos_terms = [
+        "successfully", "confirmation message", "shall save", "shall add", "shall update",
+        "shall delete", "shall create", "auto populate", "auto-populate", "shall display"
+    ]
+    has_neg = any(k in low for k in neg_terms)
+    if has_neg and not any(p in low for p in ["delete the", "save successfully", "update successfully", "register case successfully"]):
+        return "NEGATIVE"
+    return "POSITIVE"
+
+def extract_step_checkpoints(procedure: str, expected_result: str) -> Tuple[List[StepCheckpoint], bool]:
+    """
+    Universal Checkpoint Decomposer (LangGraph-style Sub-Step Alignment):
+    Splits a multi-part procedure at '(Refer expected result [k])' anchors and aligns each
+    sub-procedure with its corresponding paragraph in expected_result.
+    """
+    exp_paragraphs = [p.strip() for p in re.split(r'\n\s*\n|\n+', (expected_result or "").strip()) if p.strip()]
+    ref_pattern = re.compile(r'\(\s*refer\s+expected\s+result\s*(\d+)?\s*\)', re.IGNORECASE)
+    matches = list(ref_pattern.finditer(procedure or ""))
+
+    checkpoints: List[StepCheckpoint] = []
+    if len(matches) >= 2 and len(exp_paragraphs) >= 2:
+        last_idx = 0
+        for idx, m in enumerate(matches):
+            proc_seg = (procedure[last_idx:m.start()] or "").strip()
+            last_idx = m.end()
+            # Map explicit number if present (e.g. 'Refer expected result 2' -> index 1), else sequential
+            explicit_num = int(m.group(1)) - 1 if (m.group(1) and m.group(1).isdigit()) else idx
+            exp_idx = max(0, min(explicit_num, len(exp_paragraphs) - 1))
+            exp_seg = exp_paragraphs[exp_idx]
+            checkpoints.append(StepCheckpoint(
+                checkpoint_index=idx + 1,
+                procedure_segment=proc_seg,
+                expected_segment=exp_seg,
+                polarity=classify_segment_polarity(exp_seg)
+            ))
+    elif len(exp_paragraphs) >= 2:
+        # Even without explicit '(Refer expected result k)' tags, check if expected_result has mixed polarity paragraphs
+        pols = [classify_segment_polarity(p) for p in exp_paragraphs]
+        if len(set(pols)) > 1:
+            for idx, exp_seg in enumerate(exp_paragraphs):
+                checkpoints.append(StepCheckpoint(
+                    checkpoint_index=idx + 1,
+                    procedure_segment=(procedure or "").strip(),
+                    expected_segment=exp_seg,
+                    polarity=pols[idx]
+                ))
+
+    if not checkpoints:
+        checkpoints.append(StepCheckpoint(
+            checkpoint_index=1,
+            procedure_segment=(procedure or "").strip(),
+            expected_segment=(expected_result or "").strip(),
+            polarity=classify_segment_polarity(expected_result or "")
+        ))
+
+    is_compound = len({cp.polarity for cp in checkpoints}) > 1
+    return checkpoints, is_compound
+
 def extract_protocol(file_path: str) -> ProtocolSession:
     """
     Stage 1: Universal Protocol Extractor.
@@ -718,6 +868,7 @@ def extract_protocol(file_path: str) -> ProtocolSession:
             cpu_conf, needs_discovery = score_step_parseability(normalized_procedure, extracted_fields, action_intent)
             sub_actions = generate_sub_actions_from_step(step_id, normalized_procedure, extracted_fields, screenshot_required)
             step_assertions = infer_step_assertions(normalized_procedure, expected_result, extracted_fields)
+            checkpoints, is_compound = extract_step_checkpoints(normalized_procedure, expected_result)
 
             step = ProtocolStep(
                 step_id=step_id,
@@ -745,6 +896,8 @@ def extract_protocol(file_path: str) -> ProtocolSession:
                 capture_before_modal_ok=capture_before_modal_dismiss,
                 cpu_parse_confidence=cpu_conf,
                 needs_mode1_discovery=needs_discovery,
+                checkpoints=checkpoints,
+                is_compound_polarity=is_compound,
                 test_data={}
             )
             protocol_steps.append(step)

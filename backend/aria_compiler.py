@@ -190,6 +190,59 @@ class PlanCacheManager:
         )
         return plan
 
+    @classmethod
+    def update_cache_with_verified_dom_inputs(cls, session: ProtocolSession) -> Optional[str]:
+        """
+        Post-Run #1 Self-Locking Cache Write-Back:
+        Updates LockedProtocolPlan on disk with the actual live-DOM-verified option texts,
+        selectors, and dynamically discovered fields from step.applied_inputs so Run #2+
+        replays exact website values ('Physician', 'United States') with 0 fallback friction.
+        """
+        proto_hash = session.plan_locked_sha256 or cls.compute_protocol_sha256(session)
+        plan = cls.get_cached_plan(session.product_id, proto_hash) or cls.compile_session_plan(session)
+
+        step_lookup = {s.step_id: s for s in session.steps}
+        updated_count = 0
+
+        for locked_step in plan.steps:
+            exec_step = step_lookup.get(locked_step.step_id)
+            if not exec_step or not getattr(exec_step, "applied_inputs", None):
+                continue
+
+            existing_by_label = {cf.label.lower().strip(): cf for cf in locked_step.compiled_fields}
+            for app_inp in exec_step.applied_inputs:
+                lbl_key = (app_inp.field_label or "").lower().strip()
+                if not lbl_key or not app_inp.readback_verified:
+                    continue
+                if lbl_key in existing_by_label:
+                    cf = existing_by_label[lbl_key]
+                    if app_inp.value_applied and cf.target_value != app_inp.value_applied:
+                        cf.original_term = cf.original_term or cf.target_value
+                        cf.target_value = app_inp.value_applied
+                        cf.provenance = app_inp.provenance
+                        updated_count += 1
+                    if app_inp.selector_used:
+                        cf.fallback_css = app_inp.selector_used
+                else:
+                    # Dynamically discovered field during Mode 1 DOM binding
+                    locked_step.compiled_fields.append(CompiledControlLocator(
+                        field_id=f"{locked_step.step_id}-DYN-{len(locked_step.compiled_fields)+1:02d}",
+                        section_hint=locked_step.primary_section,
+                        label=app_inp.field_label,
+                        control_type="text",
+                        accessible_name=app_inp.field_label,
+                        fallback_css=app_inp.selector_used or None,
+                        target_value=app_inp.value_applied,
+                        provenance=app_inp.provenance,
+                        original_term=app_inp.original_term
+                    ))
+                    updated_count += 1
+
+        session.locked_plan = plan
+        saved_path = cls.save_plan_to_cache(session.product_id, plan)
+        print(f"[PlanCacheManager] Updated {updated_count} live-DOM verified control values in cache -> {saved_path}")
+        return saved_path
+
 async def heal_step_locator_with_aria(
     page: Any,
     step: ProtocolStep,

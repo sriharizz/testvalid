@@ -77,6 +77,14 @@ class StepAssertion(BaseModel):
     expected_value: Optional[str] = None
     must_contain_values: List[str] = Field(default_factory=list)
 
+class StepCheckpoint(BaseModel):
+    checkpoint_index: int                    # 1, 2, 3... in order of execution within the step
+    procedure_segment: str                   # Sub-procedure text leading up to this checkpoint
+    expected_segment: str                    # Aligned expected result clause/paragraph
+    polarity: Literal["POSITIVE", "NEGATIVE"] = "POSITIVE"
+    verified: bool = False
+    observed_detail: str = ""
+
 ControlType = Literal[
     "text",
     "select",
@@ -254,6 +262,8 @@ class ProtocolStep(BaseModel):
     applied_inputs: List[AppliedInputRecord] = Field(default_factory=list)
     gate_evaluation: Optional[GateEvaluationResult] = None
     screenshot_sha256: Optional[str] = None
+    checkpoints: List[StepCheckpoint] = Field(default_factory=list)
+    is_compound_polarity: bool = False
 
     # Runtime Execution Results
     status: Literal["QUEUED", "EXECUTING", "PASS", "FAIL", "BLOCKED"] = "QUEUED"

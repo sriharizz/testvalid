@@ -34,6 +34,11 @@ CONCEPT_CLUSTERS = [
     ("SERIOUS_NO", ["non-serious", "not serious", "non_serious", "no", "false", "n"]),
     ("MANDATORY_REQ", ["mandatory", "required", "cannot be blank", "cannot be empty", "must be filled", "missing required"]),
     ("SUCCESS_CONFIRM", ["registered successfully", "created successfully", "saved successfully", "confirmation message", "successfully"]),
+    ("COUNTRY_US", ["united states", "united states of america", "usa", "us"]),
+    ("COUNTRY_UK", ["united kingdom", "great britain", "uk", "gb"]),
+    ("COUNTRY_IN", ["india", "ind", "in"]),
+    ("COUNTRY_CA", ["canada", "can", "ca"]),
+    ("COUNTRY_DE", ["germany", "deu", "de"]),
 ]
 
 BOILERPLATE_PATTERNS = [
@@ -209,7 +214,12 @@ def match_dropdown_option(
         _, opt_concepts = normalize_and_canonicalize(opt_raw)
 
         score = 0.0
-        if tgt_concepts and (tgt_concepts & opt_concepts):
+        # Algorithmic acronym match (e.g. US -> United States, UK -> United Kingdom, USA -> United States of America)
+        words_t = [w for w in re.split(r'[\s_\-]+', opt_clean) if w and w not in {"of", "the", "and", "in", "to", "for"}]
+        acronym_t = "".join(w[0] for w in words_t) if len(words_t) >= 2 else ""
+        if acronym_t and (acronym_t == tgt_clean or "".join(w[0] for w in re.split(r'[\s_\-]+', opt_clean) if w) == tgt_clean):
+            score = 0.95
+        elif tgt_concepts and (tgt_concepts & opt_concepts):
             score = 0.90
         elif tgt_clean in opt_clean or opt_clean in tgt_clean:
             score = 0.85

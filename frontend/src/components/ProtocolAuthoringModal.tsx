@@ -47,15 +47,15 @@ export const ProtocolAuthoringModal: React.FC<ProtocolAuthoringModalProps> = ({
     {
       step_id: 'TS1-S01',
       scenario: 'Register Adverse Event Case',
-      procedure: "In Manual Case Registration, under General Information, enter:\nCase Classifications Code: Adverse Event\nCase Intake Source Code: HCP\nCompany Receipt Date: 2023-10-15\nClick Save. (µ)",
+      procedure: "In Manual Case Registration, under General Information, enter:\nCase Classifications Code: Adverse Event\nCase Intake Source Code: Spontaneous\nCompany Receipt Date: 2026-10-15\nClick Save. (µ)",
       expected_result: "System shall register case successfully with confirmation message and temporary case ID shall create.",
       requires_screenshot: true
     },
     {
       step_id: 'TS1-S02',
-      scenario: 'Negative Future Hospitalization Admission Date',
-      procedure: "Navigate to Case Intake. Pick 'Serious' for seriousness—this opens the hospitalization sub-section. Set admission date to a future date (tomorrow), fill all other mandatory patient & reporter fields with valid dummy data, choose 'Physician' as reporter type, and try to Save. (µ)",
-      expected_result: "System should block registration and show an error alert that Admission Date cannot be in the future.",
+      scenario: 'Reporter Information Verification',
+      procedure: "Under Reporter Information section, select Reporter Type code: Physician and Country code: United States. Click Save Reporter. (µ)",
+      expected_result: "Reporter details saved successfully.",
       requires_screenshot: true
     }
   ]);

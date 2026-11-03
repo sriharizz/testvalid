@@ -4,6 +4,7 @@ import json
 import hashlib
 import time
 import datetime
+import math
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 from dotenv import load_dotenv
@@ -339,62 +340,79 @@ class PlannerAgent:
 
     def query_qwen_single_batch(self, session: ProtocolSession) -> Dict[str, Any]:
         """
-        ENFORCES STRICT SINGLE-CALL INVARIANT:
-        Makes EXACTLY ONE single batched query to Qwen covering the entire protocol document.
-        Guarantees zero multiple calls.
+        ENFORCES STRICT SECTION-COHERENT LOSSLESS BATCHING INVARIANT:
+        Sends raw procedure & expected_result text (up to 2500 chars) for all steps in batches of <= 25 steps
+        so Qwen extracts fields from freeform prose even when regex found 0 fields, AND synthesizes values.
         """
-        if self.llm_call_count >= 1:
-            raise RuntimeError("CRITICAL ERROR: Multiple Qwen calls blocked! Strict single-call invariant enforced.")
+        BATCH_SIZE = 25
+        max_allowed_calls = max(1, math.ceil(len(session.steps) / BATCH_SIZE))
+
+        if self.llm_call_count >= max_allowed_calls:
+            raise RuntimeError(f"CRITICAL ERROR: Multiple Qwen calls blocked! Max allowed ({max_allowed_calls}) exceeded.")
 
         if not self.llm.is_dcs_configured() and not self.llm.groq_api_key:
             return {}
 
-        self.llm_call_count += 1
-        print(f"[PlannerAgent] Executing EXACTLY 1 single batched Qwen plan query (Call #{self.llm_call_count})...")
+        all_results: Dict[str, Any] = {}
 
-        steps_payload = []
-        for s in session.steps:
-            field_labels = [ef.label for ef in s.extracted_fields]
-            if field_labels:
+        for b_idx in range(0, len(session.steps), BATCH_SIZE):
+            batch_steps = session.steps[b_idx:b_idx + BATCH_SIZE]
+            if self.llm_call_count >= max_allowed_calls:
+                break
+
+            self.llm_call_count += 1
+            print(f"[PlannerAgent] Executing batched Qwen prose+field plan query (Call #{self.llm_call_count}/{max_allowed_calls}, steps {b_idx+1}-{min(b_idx+BATCH_SIZE, len(session.steps))})...")
+
+            steps_payload = []
+            for s in batch_steps:
                 steps_payload.append({
                     "step_id": s.step_id,
-                    "screen": s.scenario,
-                    "fields": field_labels
+                    "scenario": (s.scenario or "")[:120],
+                    "procedure": (s.procedure or "")[:2500],
+                    "expected_result": (s.expected_result or "")[:800],
+                    "regex_detected_fields": [
+                        {"label": ef.label, "type": ef.control_type, "explicit_value": ef.explicit_value}
+                        for ef in s.extracted_fields
+                    ]
                 })
 
-        system_msg = (
-            "You are a Principal Pharmacovigilance Automation Quality Engineer and GxP Test Planner.\n"
-            "CRITICAL: Do not output reasoning or thinking. Output the final valid JSON immediately.\n"
-            "Synthesize realistic, valid GxP clinical values for all requested form fields.\n"
-            "Return STRICTLY a JSON object mapping each step_id to a dictionary of field names and values.\n"
-            "No markdown wrapping, no explanation."
-        )
+            system_msg = (
+                "You are a Principal Pharmacovigilance Automation Quality Engineer and GxP Test Planner.\n"
+                "CRITICAL: Output valid JSON immediately with no markdown wrapping or commentary.\n"
+                "For EVERY step in the input:\n"
+                "1. Keep all 'regex_detected_fields' AND extract any additional form fields, dropdowns, dates, or search terms mentioned in freeform 'procedure' prose that regex missed.\n"
+                "2. If 'procedure' specifies an explicit value (e.g. 'Adverse Event', 'Serious', 'tomorrow' -> 'TODAY+1'), preserve it and set 'is_explicit': true.\n"
+                "3. If 'procedure' does not specify a literal value (e.g. '(Select from dropdown)' or 'fill mandatory fields'), synthesize a realistic clinical value and set 'is_explicit': false.\n"
+                "Return STRICTLY a JSON object mapping each step_id to a list of field action objects:\n"
+                "{\n"
+                '  "TS1-S04": [\n'
+                '    {"label": "Case Classifications Code", "control_type": "select", "target_value": "Adverse Event", "is_explicit": true},\n'
+                '    {"label": "Company Receipt Date", "control_type": "date", "target_value": "2023-10-15", "is_explicit": true}\n'
+                "  ]\n"
+                "}"
+            )
 
-        user_msg = (
-            "Protocol steps requiring test data:\n" +
-            json.dumps(steps_payload, indent=2) +
-            '\n\nOutput JSON format:\n'
-            '{\n  "TS1-S02": {"User Name": "sirihari.banda", "Password": "...", "Enterprise": "..."}, ...\n}'
-        )
+            user_msg = "Protocol steps to compile:\n" + json.dumps(steps_payload, indent=2)
 
-        resp_text = self.llm.chat_completion([
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg}
-        ], temperature=0.1, max_tokens=2500, json_mode=True)
+            resp_text = self.llm.chat_completion([
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg}
+            ], temperature=0.0, max_tokens=3000, json_mode=True)
 
-        if not resp_text:
-            return {}
+            if resp_text:
+                try:
+                    clean_json = resp_text.strip()
+                    if clean_json.startswith("```"):
+                        clean_json = re.sub(r"^```[a-zA-Z]*\n", "", clean_json)
+                        clean_json = re.sub(r"\n```$", "", clean_json)
+                    parsed = json.loads(clean_json)
+                    batch_res = parsed.get("steps", parsed)
+                    if isinstance(batch_res, dict):
+                        all_results.update(batch_res)
+                except Exception as e:
+                    print(f"[PlannerAgent] Error parsing batched Qwen plan JSON: {e}")
 
-        try:
-            clean_json = resp_text.strip()
-            if clean_json.startswith("```"):
-                clean_json = re.sub(r"^```[a-zA-Z]*\n", "", clean_json)
-                clean_json = re.sub(r"\n```$", "", clean_json)
-            parsed = json.loads(clean_json)
-            return parsed.get("steps", parsed)
-        except Exception as e:
-            print(f"[PlannerAgent] Error parsing single batched Qwen plan JSON: {e}")
-            return {}
+        return all_results
 
     def synthesize_fallback_field_action(self, ef: ExtractedFieldSpec) -> PlannedFieldAction:
         """
@@ -591,7 +609,12 @@ class PlannerAgent:
 
             # Read step plan from the single batched response
             step_plan = qwen_batch_results.get(step.step_id, {})
-            if isinstance(step_plan, dict) and "field_values" in step_plan:
+            qwen_field_vals = {}
+            if isinstance(step_plan, list):
+                for item in step_plan:
+                    if isinstance(item, dict) and "label" in item:
+                        qwen_field_vals[item["label"]] = item.get("target_value")
+            elif isinstance(step_plan, dict) and "field_values" in step_plan:
                 qwen_field_vals = step_plan.get("field_values", {})
             elif isinstance(step_plan, dict):
                 qwen_field_vals = step_plan
@@ -599,22 +622,64 @@ class PlannerAgent:
                 qwen_field_vals = {}
             qwen_commands = step_plan.get("commands", []) if isinstance(step_plan, dict) else []
 
-            # 1. Synthesize 100% of extracted fields
+            # 1. Synthesize 100% of extracted fields (Strict ALCOA+: explicit protocol values take precedence)
             for ef in step.extracted_fields:
-                if ef.label in qwen_field_vals and qwen_field_vals[ef.label]:
+                if ef.explicit_value:
+                    pfa = self.synthesize_fallback_field_action(ef)
+                elif ef.label in qwen_field_vals and qwen_field_vals[ef.label]:
                     pfa = PlannedFieldAction(
                         field_id=ef.field_id,
                         section=ef.section,
                         label=ef.label,
                         control_type=ef.control_type,
                         target_value=str(qwen_field_vals[ef.label]),
-                        expect_auto_populated=(ef.control_type == "auto_populate_verify" or ef.auto_populated)
+                        expect_auto_populated=(ef.control_type == "auto_populate_verify" or ef.auto_populated),
+                        provenance="ai_synthesized_mandatory"
                     )
                 else:
                     pfa = self.synthesize_fallback_field_action(ef)
 
                 field_actions.append(pfa)
                 test_data[ef.label] = pfa.target_value
+
+            # Second, if Qwen returned a list of field action dicts, check if it discovered additional prose fields
+            if isinstance(step_plan, list):
+                existing_labels_lower = {ef.label.lower().strip() for ef in step.extracted_fields}
+                for item in step_plan:
+                    if isinstance(item, dict) and "label" in item:
+                        lbl = item["label"].strip()
+                        if lbl.lower() not in existing_labels_lower:
+                            existing_labels_lower.add(lbl.lower())
+                            raw_c_type = str(item.get("control_type", "text")).lower()
+                            valid_types = {
+                                "text", "select", "date", "toggle", "modal_search_select",
+                                "auto_populate_verify", "button_click", "link_new_tab",
+                                "file_download", "hover_tooltip_verify"
+                            }
+                            c_type: ControlType = raw_c_type if raw_c_type in valid_types else "text"
+                            t_val = str(item.get("target_value", ""))
+                            is_expl = bool(item.get("is_explicit", False))
+                            prov: ValueProvenance = "protocol_explicit" if is_expl else "ai_synthesized_mandatory"
+                            new_ef = ExtractedFieldSpec(
+                                field_id=f"{step.step_id}-LLM-{len(step.extracted_fields)+1:02d}",
+                                section=step.primary_section,
+                                label=lbl,
+                                raw_instruction=f"(LLM prose extracted '{t_val}')",
+                                control_type=c_type,
+                                explicit_value=t_val if is_expl else None
+                            )
+                            step.extracted_fields.append(new_ef)
+                            pfa = PlannedFieldAction(
+                                field_id=new_ef.field_id,
+                                section=step.primary_section,
+                                label=lbl,
+                                control_type=c_type,
+                                target_value=t_val,
+                                expect_auto_populated=False,
+                                provenance=prov
+                            )
+                            field_actions.append(pfa)
+                            test_data[lbl] = t_val
 
             # 2. Assign executable commands from batch response or deterministic mapping
             if qwen_commands:
