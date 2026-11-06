@@ -21,7 +21,7 @@ export const App: React.FC = () => {
   const [authoringStage, setAuthoringStage] = useState<number>(0);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [simMode, setSimMode] = useState<SimulationMode>('PASS');
-  const [visibleBrowser, setVisibleBrowser] = useState<boolean>(false);
+  const [visibleBrowser, setVisibleBrowser] = useState<boolean>(true);
 
   // Lightbox Modal State
   const [lightboxData, setLightboxData] = useState<LightboxData | null>(null);
@@ -41,7 +41,7 @@ export const App: React.FC = () => {
   // Target Environment & Credentials States
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string>('onepv');
-  const [targetUrl, setTargetUrl] = useState<string>('https://mpv-two.vercel.app');
+  const [targetUrl, setTargetUrl] = useState<string>('https://dev.one-aipv.com');
 
   // Fetch available products and synchronize initial target URL
   useEffect(() => {
@@ -60,7 +60,7 @@ export const App: React.FC = () => {
   }, []);
 
   // Credential Gate States
-  const [username, setUsername] = useState<string>('sirihari.banda');
+  const [username, setUsername] = useState<string>('srihari.banda');
   const [password, setPassword] = useState<string>('Clinevo@2026');
   const [enterprise, setEnterprise] = useState<string>('Clinevo');
   const [requiresApproval, setRequiresApproval] = useState<boolean>(false);

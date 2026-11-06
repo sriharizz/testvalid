@@ -213,7 +213,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 type="text"
                 value={targetUrl}
                 onChange={(e) => onTargetUrlChange(e.target.value)}
-                placeholder="https://mpv-two.vercel.app"
+                placeholder="https://dev.one-aipv.com"
                 className="w-full bg-slate-800/90 border border-slate-700 text-emerald-300 font-mono text-xs rounded-xl pl-3 pr-10 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
               />
               <div className="absolute right-3 top-3">
@@ -281,7 +281,27 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </div>
           </div>
 
-
+          {/* 4. Browser Execution Mode (Headed Edge) */}
+          <div className="flex items-center justify-between p-3.5 bg-slate-800/60 rounded-xl border border-slate-700/60">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+                <Laptop className="w-4 h-4 text-cyan-400" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-slate-200">Visible Microsoft Edge Window (head=1)</div>
+                <div className="text-[11px] text-slate-400">Launch Microsoft Edge visibly on your desktop during validation</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onVisibleBrowserChange(!visibleBrowser)}
+              className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+                visibleBrowser ? 'bg-cyan-500 justify-end' : 'bg-slate-700 justify-start'
+              }`}
+            >
+              <div className="w-4 h-4 rounded-full bg-white shadow-md" />
+            </button>
+          </div>
 
           {/* Action CTAs */}
           <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">

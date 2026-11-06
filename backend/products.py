@@ -7,9 +7,9 @@ class ProductConfig(BaseModel):
     description: str
     base_url: str
     login_path: str = "/login"
-    home_path: str = "/intake/manual-case-registration"
+    home_path: str = "/dashboard/Intake/Manual%20Case%20Registration"
     default_credentials: Dict[str, str] = {
-        "username": "sirihari.banda",
+        "username": "srihari.banda",
         "password": "Clinevo@2026",
         "enterprise": "Clinevo"
     }
@@ -17,11 +17,11 @@ class ProductConfig(BaseModel):
 PRODUCT_REGISTRY: Dict[str, ProductConfig] = {
     "onepv": ProductConfig(
         product_id="onepv",
-        name="Clinevo OnePV",
-        description="Pharmacovigilance Intake, Case Registration, and Triage portal",
-        base_url="https://mpv-two.vercel.app",
+        name="Clinevo OnePV (Dev)",
+        description="Clinevo OnePV Enterprise Safety and Adverse Event Intake",
+        base_url="https://dev.one-aipv.com",
         login_path="/login",
-        home_path="/intake/manual-case-registration"
+        home_path="/dashboard/Intake/Manual%20Case%20Registration"
     ),
     "signal": ProductConfig(
         product_id="signal",
@@ -30,6 +30,14 @@ PRODUCT_REGISTRY: Dict[str, ProductConfig] = {
         base_url="https://signal.clinevo.com",
         login_path="/login",
         home_path="/signal/dashboard"
+    ),
+    "onepv_mock": ProductConfig(
+        product_id="onepv_mock",
+        name="Clinevo OnePV (Mock Vercel)",
+        description="Mock OnePV Sandbox for offline and demo qualification",
+        base_url="https://mpv-two.vercel.app",
+        login_path="/login",
+        home_path="/intake/manual-case-registration"
     ),
     "custom": ProductConfig(
         product_id="custom",
@@ -47,13 +55,3 @@ def get_product(product_id: str) -> ProductConfig:
 
 def list_products() -> List[ProductConfig]:
     return list(PRODUCT_REGISTRY.values())
-
-def register_custom_product(product_id: str, name: str, base_url: str, description: str = "") -> ProductConfig:
-    cfg = ProductConfig(
-        product_id=product_id.lower().strip(),
-        name=name,
-        description=description or f"Custom portal at {base_url}",
-        base_url=base_url.rstrip("/")
-    )
-    PRODUCT_REGISTRY[cfg.product_id] = cfg
-    return cfg

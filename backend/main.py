@@ -460,12 +460,12 @@ def get_session_summary(session_id: str):
 
 class ExecuteRequest(BaseModel):
     sim_mode: str = "PASS"
-    username: str = "sirihari.banda"
+    username: str = "srihari.banda"
     password: str = "Clinevo@2026"
     enterprise: str = "Clinevo"
     target_url: Optional[str] = None
     requires_approval: bool = False
-    headless: bool = True
+    headless: Optional[bool] = None
     max_steps: Optional[int] = None
 
 @app.post("/api/execute/{session_id}")
@@ -490,10 +490,11 @@ async def execute_session(
             except Exception as e:
                 print(f"ws_cb error: {e}")
 
-        target_base = req.target_url or os.environ.get("TARGET_APP_URL", "https://mpv-two.vercel.app")
+        target_base = req.target_url or os.environ.get("TARGET_APP_URL", "https://dev.one-aipv.com")
         executor = PortalExecutionService(
             base_url=target_base,
-            headless=req.headless
+            headless=req.headless,
+            pw_channel=os.environ.get("PW_CHANNEL", "msedge")
         )
 
         try:

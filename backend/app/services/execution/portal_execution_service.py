@@ -32,13 +32,25 @@ class PortalExecutionService:
 
     def __init__(
         self,
-        base_url: str = "https://mpv-two.vercel.app",
-        headless: bool = True,
+        base_url: str = "https://dev.one-aipv.com",
+        headless: Optional[bool] = None,
         pw_channel: Optional[str] = None
     ) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.headless = headless
-        self.pw_channel = pw_channel or os.environ.get("PW_CHANNEL", None)
+        p = urlparse(base_url)
+        if p.scheme and p.netloc:
+            self.base_url = f"{p.scheme}://{p.netloc}"
+        else:
+            self.base_url = base_url.rstrip("/")
+
+        env_headed = os.environ.get("PW_HEADED", "0").strip().lower() in ("1", "true")
+        if env_headed:
+            self.headless = False
+        elif headless is not None:
+            self.headless = headless
+        else:
+            self.headless = False  # Headed Edge window (head=1)
+
+        self.pw_channel = pw_channel or os.environ.get("PW_CHANNEL", "msedge")
 
     def run_execution(
         self,
@@ -76,7 +88,8 @@ class PortalExecutionService:
 
             context = browser.new_context(
                 viewport={"width": 1366, "height": 768},
-                locale="en-US"
+                locale="en-US",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
             )
             page = context.new_page()
             page.set_default_timeout(15000)
@@ -124,11 +137,28 @@ class PortalExecutionService:
                 page.wait_for_timeout(600)
                 broadcast_frame("Loaded Login Page")
 
-                user_field = page.locator("#username, input[placeholder*='Username' i], input[name='username']").first
-                pwd_field = page.locator("#password, input[placeholder*='Password' i], input[name='password']").first
-                ent_field = page.locator("#enterprise, input[placeholder*='Enterprise' i], input[name='enterprise']").first
+                # Check if the target application returned 403 Forbidden
+                page_text = page.inner_text("body") if page.is_visible("body") else ""
+                if "403 forbidden" in page_text.lower():
+                    err_msg = (
+                        f"Target host '{self.base_url}' returned HTTP 403 Forbidden. "
+                        "Access is blocked by network firewall or requires corporate VPN."
+                    )
+                    broadcast_frame(err_msg)
+                    emit_ws({"type": "EXECUTION_ERROR", "error": err_msg})
+                    capture_evidence(session.steps[0].step_id if session.steps else "AUTH_ERR", "403 Forbidden")
+                    for s in session.steps:
+                        s.status = "FAIL"
+                        s.pass_fail_text = "Fail"
+                        s.observed_result = err_msg
+                        emit_ws({"type": "STEP_UPDATE", "step": s.model_dump()})
+                    return session
 
-                username_val = credentials.get("username", "sirihari.banda")
+                user_field = page.locator("#username, input[placeholder*='Username' i], input[name='username'], input[formcontrolname='userName']").first
+                pwd_field = page.locator("#loginpassword, #password, input[placeholder*='Password' i], input[name='password'], input[formcontrolname='password']").first
+                ent_field = page.locator("#enterpriseName, #enterprise, input[placeholder*='Enterprise' i], input[name='enterprise'], input[formcontrolname='enterpriseName']").first
+
+                username_val = credentials.get("username", "srihari.banda")
                 password_val = credentials.get("password", "Clinevo@2026")
                 enterprise_val = credentials.get("enterprise", "Clinevo")
 
@@ -154,6 +184,33 @@ class PortalExecutionService:
                     submit_btn.click()
                     broadcast_frame("Submitted Authentication")
 
+                    page.wait_for_timeout(2000)
+
+                    # Check for Dev OnePV authentication failure toast
+                    toasts = page.locator(".toast, .alert, .snack, .mat-mdc-snack-bar-container, [role='alert']").all()
+                    toast_text = ""
+                    for t in toasts:
+                        try:
+                            if t.is_visible():
+                                txt = t.inner_text().strip()
+                                if txt and any(k in txt.lower() for k in ["invalid", "denied", "error", "failed"]):
+                                    toast_text = txt
+                                    break
+                        except Exception:
+                            pass
+
+                    if toast_text:
+                        err_msg = f"Dev OnePV Authentication: {toast_text}"
+                        broadcast_frame(err_msg)
+                        emit_ws({"type": "AUTH_FAILED", "message": err_msg})
+                        capture_evidence(session.steps[0].step_id if session.steps else "AUTH_ERR", "Auth Denied")
+                        for s in session.steps:
+                            s.status = "FAIL"
+                            s.pass_fail_text = "Fail"
+                            s.observed_result = err_msg
+                            emit_ws({"type": "STEP_UPDATE", "step": s.model_dump()})
+                        return session
+
                     # Wait for redirect away from /login
                     try:
                         page.wait_for_url(lambda u: "/login" not in u.lower(), timeout=20000)
@@ -163,9 +220,9 @@ class PortalExecutionService:
                     page.wait_for_timeout(600)
                     broadcast_frame(f"Authenticated successfully: {page.url}")
 
-                # Ensure on Manual Case Registration if navigating to Intake
-                if "/intake/manual-case-registration" not in page.url.lower():
-                    mcr_url = f"{self.base_url}/intake/manual-case-registration"
+                # Ensure on Manual Case Registration
+                if "manual" not in page.url.lower():
+                    mcr_url = f"{self.base_url}/dashboard/Intake/Manual%20Case%20Registration"
                     try:
                         page.goto(mcr_url, wait_until="domcontentloaded", timeout=15000)
                     except Exception:
