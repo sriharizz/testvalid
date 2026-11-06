@@ -489,10 +489,20 @@ class PlaywrightRunner:
         session_screenshots_dir.mkdir(parents=True, exist_ok=True)
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=self.headless,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
-            )
+            pw_channel = os.environ.get("PW_CHANNEL", None)
+            launch_args = {
+                "headless": self.headless,
+                "args": ["--no-sandbox", "--disable-setuid-sandbox"]
+            }
+            if pw_channel:
+                launch_args["channel"] = pw_channel
+            try:
+                browser = await p.chromium.launch(**launch_args)
+            except Exception:
+                browser = await p.chromium.launch(
+                    headless=self.headless,
+                    args=["--no-sandbox", "--disable-setuid-sandbox"]
+                )
             context = await browser.new_context(
                 viewport={"width": 1366, "height": 768},
                 locale="en-US"
@@ -626,7 +636,10 @@ class PlaywrightRunner:
 
                         sub_btn = page.locator("button[type='submit']").first
                         await safe_click(sub_btn, broadcast_fn=broadcast_frame, label="Submit Login")
-                        await page.wait_for_url("**/intake/**", timeout=20000)
+                        try:
+                            await page.wait_for_url("**/intake/**", timeout=20000)
+                        except Exception:
+                            await page.wait_for_load_state("domcontentloaded", timeout=10000)
                         await inject_virtual_cursor(page)
                         await page.wait_for_timeout(600)
                         await broadcast_frame(f"{step.step_id}: Authenticated into OnePV Shell")

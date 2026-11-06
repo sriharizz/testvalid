@@ -1,8 +1,16 @@
 import os
 import sys
 from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BACKEND_DIR.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 import shutil
 import uuid
@@ -228,8 +236,9 @@ async def execute_session(
             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
         async def worker_coro():
+            target_url = os.environ.get("TARGET_APP_URL", "https://mpv-two.vercel.app")
             runner = PlaywrightRunner(
-                base_url="https://mpv-two.vercel.app",
+                base_url=target_url,
                 headless=req.headless
             )
             async def ws_cb(msg):
