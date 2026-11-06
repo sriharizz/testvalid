@@ -38,7 +38,7 @@ from protocol_generator import ProtocolGenerator
 from extractor import extract_protocol
 from check_coverage import CoverageChecker, check_plan_to_spec, check_protocol_to_plan
 from agents import PlannerAgent, PlaywrightGeneratorAgent, HealerAgent, compute_git_baseline
-from playwright_runner import PlaywrightRunner
+from backend.app.services.execution.portal_execution_service import PortalExecutionService
 from docx_writer import DocxWriter
 
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -435,11 +435,35 @@ def get_session(session_id: str):
                 step.screenshot_url = f"/api/artifacts/screenshots/{session_id}/{step.step_id}.png"
     return session.model_dump()
 
+
+@app.get("/api/session-summary/{session_id}")
+def get_session_summary(session_id: str):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = sessions[session_id]
+    passed = sum(1 for s in session.steps if s.status == "PASS")
+    failed = sum(1 for s in session.steps if s.status == "FAIL")
+    blocked = sum(1 for s in session.steps if s.status == "BLOCKED")
+    total = len(session.steps)
+    return {
+        "session_id": session.session_id,
+        "document_no": session.document_no,
+        "title": session.title,
+        "passed_steps": passed,
+        "failed_steps": failed,
+        "blocked_steps": blocked,
+        "total_steps": total,
+        "status": "PASS" if failed == 0 and total > 0 else "FAIL",
+        "evidence_count": total,
+        "audit_trail_ready": True
+    }
+
 class ExecuteRequest(BaseModel):
     sim_mode: str = "PASS"
     username: str = "sirihari.banda"
     password: str = "Clinevo@2026"
     enterprise: str = "Clinevo"
+    target_url: Optional[str] = None
     requires_approval: bool = False
     headless: bool = True
     max_steps: Optional[int] = None
@@ -460,51 +484,43 @@ async def execute_session(
     main_loop = asyncio.get_running_loop()
 
     def run_worker_thread():
-        # Ensure Windows Proactor event loop policy for flawless Playwright subprocess support
-        if sys.platform == "win32":
-            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        def ws_cb(msg):
+            try:
+                asyncio.run_coroutine_threadsafe(broadcast_to_session(session_id, msg), main_loop)
+            except Exception as e:
+                print(f"ws_cb error: {e}")
 
-        async def worker_coro():
-            target_url = os.environ.get("TARGET_APP_URL", "https://mpv-two.vercel.app")
-            runner = PlaywrightRunner(
-                base_url=target_url,
-                headless=req.headless
+        target_base = req.target_url or os.environ.get("TARGET_APP_URL", "https://mpv-two.vercel.app")
+        executor = PortalExecutionService(
+            base_url=target_base,
+            headless=req.headless
+        )
+
+        try:
+            executor.run_execution(
+                session=session,
+                credentials={
+                    "username": req.username,
+                    "password": req.password,
+                    "enterprise": req.enterprise
+                },
+                requires_approval=req.requires_approval,
+                approval_event=approval_event,
+                ws_callback=ws_cb,
+                is_halt_requested=lambda: session_halt_flags.get(session_id, False),
+                max_steps=req.max_steps
             )
-            async def ws_cb(msg):
-                try:
-                    asyncio.run_coroutine_threadsafe(broadcast_to_session(session_id, msg), main_loop)
-                except Exception as e:
-                    print(f"ws_cb error: {e}")
+        except Exception as e:
+            print(f"Executor error: {e}")
 
-            try:
-                await runner.run_protocol(
-                    session=session,
-                    sim_mode=req.sim_mode,
-                    credentials={
-                        "username": req.username,
-                        "password": req.password,
-                        "enterprise": req.enterprise
-                    },
-                    plan_steps=session_plans.get(session_id, []),
-                    requires_approval=req.requires_approval,
-                    approval_event=approval_event,
-                    ws_callback=ws_cb,
-                    is_halt_requested=lambda: session_halt_flags.get(session_id, False),
-                    max_steps=req.max_steps
-                )
-            except Exception as e:
-                print(f"Runner execution exception: {e}")
-
-            # Notify complete
-            try:
-                asyncio.run_coroutine_threadsafe(broadcast_to_session(session_id, {
-                    "type": "EXECUTION_COMPLETE",
-                    "session": session.model_dump()
-                }), main_loop)
-            except Exception as e:
-                print(f"Execution complete broadcast error: {e}")
-
-        asyncio.run(worker_coro())
+        # Broadcast completion
+        try:
+            asyncio.run_coroutine_threadsafe(broadcast_to_session(session_id, {
+                "type": "EXECUTION_COMPLETE",
+                "session": session.model_dump()
+            }), main_loop)
+        except Exception as e:
+            print(f"Execution complete broadcast error: {e}")
 
     worker_thread = threading.Thread(target=run_worker_thread, daemon=True)
     worker_thread.start()
