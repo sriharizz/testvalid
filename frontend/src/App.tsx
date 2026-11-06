@@ -1,4 +1,6 @@
-import React, { useState, useRef } from 'react';
+import { ExecutionSummaryModal, SummaryReportData } from './components/ExecutionSummaryModal';
+import { ProtocolAuthoringModal } from './components/ProtocolAuthoringModal';
+import React, { useState, useRef, useEffect } from 'react';
 import { ProtocolSession, ProtocolStep, SimulationMode, TraceStage } from './types';
 import { TopHeaderBar } from './components/TopHeaderBar';
 import { MiddleSequencePane } from './components/MiddleSequencePane';
@@ -6,6 +8,9 @@ import { RightDocInspector } from './components/RightDocInspector';
 import { LiveBrowserModal } from './components/LiveBrowserModal';
 import { ArtifactModal } from './components/ArtifactModal';
 import { ScreenshotLightboxModal, LightboxData } from './components/ScreenshotLightboxModal';
+import { TargetSetupBar, ProductItem } from './components/TargetSetupBar';
+import { LoginPage } from './components/LoginPage';
+import { ProjectFolderExplorer } from './components/ProjectFolderExplorer';
 
 export const App: React.FC = () => {
   // Protocol State: Strictly null on initial load (Zero hardcoded preloads)
@@ -29,6 +34,31 @@ export const App: React.FC = () => {
     });
   };
 
+  // Authentication & Session State
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [folderRefreshTrigger, setFolderRefreshTrigger] = useState<number>(0);
+
+  // Target Environment & Credentials States
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<string>('onepv');
+  const [targetUrl, setTargetUrl] = useState<string>('https://mpv-two.vercel.app');
+
+  // Fetch available products and synchronize initial target URL
+  useEffect(() => {
+    fetch('/api/products')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.products) {
+          setProducts(data.products);
+          const current = data.products.find((p: ProductItem) => p.product_id === selectedProduct);
+          if (current && current.base_url) {
+            setTargetUrl(current.base_url);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Credential Gate States
   const [username, setUsername] = useState<string>('sirihari.banda');
   const [password, setPassword] = useState<string>('Clinevo@2026');
@@ -44,6 +74,13 @@ export const App: React.FC = () => {
   const [isWsConnected, setIsWsConnected] = useState<boolean>(false);
 
   // Artifact Modal
+    // Executive Summary & AI RCA State
+  const [summaryData, setSummaryData] = useState<SummaryReportData | null>(null);
+  const [isSummaryOpen, setIsSummaryOpen] = useState<boolean>(false);
+
+  // OQ / PQ Authoring Modal State
+  const [isAuthoringModalOpen, setIsAuthoringModalOpen] = useState<boolean>(false);
+
   const [selectedStage, setSelectedStage] = useState<TraceStage | null>(null);
 
   // GxP Human Review Safety Gate
@@ -58,7 +95,7 @@ export const App: React.FC = () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // Manual Protocol Upload Handler (processes the user's uploaded Word file dynamically)
-  const handleUploadFile = async (file: File) => {
+  const handleUploadFile = async (file: File, productId: string = selectedProduct) => {
     setIsAuthoring(true);
     setAuthoringStage(1); // Stage 1: Extraction running
     setSession(null);
@@ -72,6 +109,7 @@ export const App: React.FC = () => {
       // 2. Upload file to backend for dynamic extraction and Groq Qwen planner
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('product_id', productId);
 
       // Stage 2 indicator: Groq planning
       const timer = setTimeout(() => {
@@ -104,6 +142,7 @@ export const App: React.FC = () => {
       await sleep(250);
 
       setSession(data);
+      setFolderRefreshTrigger((prev) => prev + 1);
       // Automatically select first step so document immediately shows Step 1
       setSelectedStepId(data.steps && data.steps.length > 0 ? data.steps[0].step_id : null);
     } catch (err) {
@@ -115,7 +154,7 @@ export const App: React.FC = () => {
   };
 
   // Sample Protocol Selection (Dropdown option)
-  const handleLoadSample = async (filename: string) => {
+  const handleLoadSample = async (filename: string, productId: string = selectedProduct) => {
     setIsAuthoring(true);
     setAuthoringStage(1);
     setSession(null);
@@ -124,6 +163,7 @@ export const App: React.FC = () => {
     try {
       const formData = new FormData();
       formData.append('filename', filename);
+      formData.append('product_id', productId);
 
       const timer = setTimeout(() => {
         setAuthoringStage(2);
@@ -165,6 +205,39 @@ export const App: React.FC = () => {
       setSelectedStepId(data.steps && data.steps.length > 0 ? data.steps[0].step_id : null);
     } catch (err) {
       console.error('Failed to load sample protocol:', err);
+    } finally {
+      setIsAuthoring(false);
+      setAuthoringStage(7);
+    }
+  };
+
+  const handleLoadDirectSession = async (data: ProtocolSession) => {
+    setIsAuthoring(true);
+    setAuthoringStage(1);
+    setSession(data);
+    setSelectedStepId(data.steps && data.steps.length > 0 ? data.steps[0].step_id : null);
+    try {
+      const rawRes = await fetch(`/api/raw-protocol/${data.session_id}`);
+      if (rawRes.ok) {
+        const buf = await rawRes.arrayBuffer();
+        setRawDocxBuffer(buf);
+      }
+
+      setAuthoringStage(2);
+      await sleep(400);
+      setAuthoringStage(3);
+      await sleep(250);
+      setAuthoringStage(4);
+      await sleep(250);
+      setAuthoringStage(5);
+      await sleep(250);
+      setAuthoringStage(6);
+      await sleep(150);
+
+      setSession(data);
+      setSelectedStepId(data.steps && data.steps.length > 0 ? data.steps[0].step_id : null);
+    } catch (err) {
+      console.error('Failed to load direct session:', err);
     } finally {
       setIsAuthoring(false);
       setAuthoringStage(7);
@@ -213,13 +286,22 @@ export const App: React.FC = () => {
             flagType: msg.flag_type || 'AMBIGUITY',
             reason: msg.reason || 'GxP Ambiguity detected. Human review required before taking any action or evidence.',
           });
-        } else if (msg.type === 'EXECUTION_COMPLETE') {
+                } else if (msg.type === 'EXECUTION_COMPLETE') {
           setIsExecuting(false);
           setWaitingForApproval(false);
           setHumanReviewAlert(null);
           if (msg.session) {
             setSession(msg.session);
           }
+          // Fetch and display AI Executive Summary automatically
+          const targetSid = (msg.session && msg.session.session_id) || session?.session_id;
+          fetch(`/api/session-summary/${targetSid}`)
+            .then((r) => r.json())
+            .then((data) => {
+              setSummaryData(data);
+              setIsSummaryOpen(true);
+            })
+            .catch((e) => console.error('Summary fetch error:', e));
         }
       } catch (e) {
         console.error('Error parsing WebSocket message:', e);
@@ -257,6 +339,7 @@ export const App: React.FC = () => {
         username,
         password,
         enterprise,
+        target_url: targetUrl,
         requires_approval: requiresApproval,
         headless: !visibleBrowser, // If visibleBrowser is toggled, launch visible Chromium window!
         max_steps: null,
@@ -291,9 +374,35 @@ export const App: React.FC = () => {
       .catch((err) => console.error('Halt execution error:', err));
   };
 
+      const handleArchiveSession = async () => {
+    if (!session) return null;
+    const res = await fetch(`/api/archive-session/${session.session_id}`, { method: 'POST' });
+    const data = await res.json();
+    if (summaryData) {
+      setSummaryData({ ...summaryData, archive_status: 'ARCHIVED' });
+    }
+    return data;
+  };
+
+  const handleOpenSummary = () => {
+    if (!session) return;
+    fetch(`/api/session-summary/${session.session_id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setSummaryData(data);
+        setIsSummaryOpen(true);
+      })
+      .catch((e) => console.error('Summary fetch error:', e));
+  };
+
   const handleDownloadDocx = () => {
     if (!session) return;
     window.location.href = `/api/download-executed-docx/${session.session_id}`;
+  };
+
+  const handleDownloadEvidence = () => {
+    if (!session) return;
+    window.location.href = `/api/download-companion-evidence-docx/${session.session_id}`;
   };
 
   const shortCode = session?.document_no
@@ -302,64 +411,104 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 text-slate-800 font-sans select-none overflow-hidden">
-      {/* 1. Full-Width Top Header Bar */}
-      <TopHeaderBar
-        session={session}
-        simMode={simMode}
-        onSimModeChange={setSimMode}
-        visibleBrowser={visibleBrowser}
-        onVisibleBrowserChange={setVisibleBrowser}
-        onUploadFile={handleUploadFile}
-        onLoadSample={handleLoadSample}
-        onExecute={handleExecute}
-        onOpenLiveBrowser={() => setIsLiveBrowserOpen(true)}
-        onDownloadDocx={handleDownloadDocx}
-        isExecuting={isExecuting}
-        isAuthoring={isAuthoring}
-      />
+      {!isLoggedIn ? (
+        <LoginPage
+          products={products}
+          selectedProduct={selectedProduct}
+          onProductChange={setSelectedProduct}
+          targetUrl={targetUrl}
+          onTargetUrlChange={setTargetUrl}
+          username={username}
+          onUsernameChange={setUsername}
+          password={password}
+          onPasswordChange={setPassword}
+          enterprise={enterprise}
+          onEnterpriseChange={setEnterprise}
+          simMode={simMode}
+          onSimModeChange={setSimMode}
+          visibleBrowser={visibleBrowser}
+          onVisibleBrowserChange={setVisibleBrowser}
+          requiresApproval={requiresApproval}
+          onRequiresApprovalChange={setRequiresApproval}
+          onProceedToFolders={() => setIsLoggedIn(true)}
+          onProceedToWorkspace={() => setIsLoggedIn(true)}
+        />
+      ) : (
+        <>
+          {/* 1. Sleek, Minimalist Top Header Bar (Zero Button Clutter) */}
+          <TopHeaderBar
+            session={session}
+            selectedProduct={selectedProduct}
+            products={products}
+            targetUrl={targetUrl}
+            username={username}
+            isExecuting={isExecuting}
+            onExecute={handleExecute}
+            onOpenLiveBrowser={() => setIsLiveBrowserOpen(true)}
+            onDownloadDocx={handleDownloadDocx}
+            onDownloadEvidence={handleDownloadEvidence}
+            onOpenSummaryModal={handleOpenSummary}
+            onLogout={() => setIsLoggedIn(false)}
+          />
 
-      {/* Manual Login Approval Gate Banner */}
-      {waitingForApproval && (
-        <div className="bg-amber-500 text-white px-5 py-2.5 flex items-center justify-between shadow-lg z-40 border-b border-amber-600 animate-in fade-in">
-          <div className="flex items-center gap-2.5 text-sm font-semibold">
-            <span className="text-lg">⚠️</span>
-            <span>Manual Login Approval Gate: Browser is paused on login screen. Review credentials and proceed when ready.</span>
-          </div>
-          <button
-            onClick={handleApproveLogin}
-            className="px-4 py-1.5 bg-white text-amber-900 rounded-lg font-bold text-xs shadow hover:bg-amber-50 transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <span>Approve &amp; Continue Execution</span>
-            <span>→</span>
-          </button>
-        </div>
+          {/* Manual Login Approval Gate Banner */}
+          {waitingForApproval && (
+            <div className="bg-amber-500 text-white px-5 py-2.5 flex items-center justify-between shadow-lg z-40 border-b border-amber-600 animate-in fade-in">
+              <div className="flex items-center gap-2.5 text-sm font-semibold">
+                <span className="text-lg">⚠️</span>
+                <span>Manual Login Approval Gate: Browser is paused on login screen. Review credentials and proceed when ready.</span>
+              </div>
+              <button
+                onClick={handleApproveLogin}
+                className="px-4 py-1.5 bg-white text-amber-900 rounded-lg font-bold text-xs shadow hover:bg-amber-50 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <span>Approve &amp; Continue Execution</span>
+                <span>→</span>
+              </button>
+            </div>
+          )}
+
+          {/* 2. Main 3-Column Portal Layout */}
+          <main className="flex-1 flex overflow-hidden">
+            {/* Left Sidebar: Project Folders Management tailored to selected product */}
+            <ProjectFolderExplorer
+              selectedProduct={selectedProduct}
+              products={products}
+              targetUrl={targetUrl}
+              username={username}
+              currentSession={session}
+              onSelectProtocol={(fname) => handleLoadSample(fname, selectedProduct)}
+              onUploadFile={(file) => handleUploadFile(file, selectedProduct)}
+              onOpenAuthoringModal={() => setIsAuthoringModalOpen(true)}
+              onLogout={() => setIsLoggedIn(false)}
+              isSidebar={true}
+              refreshTrigger={folderRefreshTrigger}
+            />
+
+            {/* Column 2: Live Test Sequence (Connected Series) */}
+            <MiddleSequencePane
+              steps={session?.steps || []}
+              selectedStepId={selectedStepId}
+              onSelectStep={(stepId) => setSelectedStepId(stepId)}
+              documentShortCode={shortCode}
+              isAuthoring={isAuthoring}
+              onExecute={handleExecute}
+              isExecuting={isExecuting}
+              onOpenLightbox={handleOpenLightbox}
+            />
+
+            {/* Column 3: Active Protocol Document Inspector */}
+            <RightDocInspector
+              session={session}
+              rawDocxBuffer={rawDocxBuffer}
+              selectedStepId={selectedStepId}
+              onSelectStep={(stepId) => setSelectedStepId(stepId)}
+              isExecuting={isExecuting}
+              onOpenLightbox={handleOpenLightbox}
+            />
+          </main>
+        </>
       )}
-
-      {/* 2. Main 2-Column Split-Screen Portal Layout */}
-      <main className="flex-1 flex overflow-hidden">
-
-        {/* Column 2: Live Test Sequence (Connected Series) */}
-        <MiddleSequencePane
-          steps={session?.steps || []}
-          selectedStepId={selectedStepId}
-          onSelectStep={(stepId) => setSelectedStepId(stepId)}
-          documentShortCode={shortCode}
-          isAuthoring={isAuthoring}
-          onExecute={handleExecute}
-          isExecuting={isExecuting}
-          onOpenLightbox={handleOpenLightbox}
-        />
-
-        {/* Column 3: Active Protocol Document Inspector */}
-        <RightDocInspector
-          session={session}
-          rawDocxBuffer={rawDocxBuffer}
-          selectedStepId={selectedStepId}
-          onSelectStep={(stepId) => setSelectedStepId(stepId)}
-          isExecuting={isExecuting}
-          onOpenLightbox={handleOpenLightbox}
-        />
-      </main>
 
       {/* Live Browser Modal / Drawer */}
       <LiveBrowserModal
@@ -436,6 +585,24 @@ export const App: React.FC = () => {
       <ScreenshotLightboxModal
         data={lightboxData}
         onClose={() => setLightboxData(null)}
+      />
+
+      {/* AI-Assisted OQ/PQ Protocol Authoring Modal */}
+      <ProtocolAuthoringModal
+        isOpen={isAuthoringModalOpen}
+        onClose={() => setIsAuthoringModalOpen(false)}
+        onLoadGeneratedProtocol={(filename) => handleLoadSample(filename)}
+        onLoadDirectSession={handleLoadDirectSession}
+      />
+
+      {/* AI Executive Summary & Root-Cause Analysis Modal */}
+      <ExecutionSummaryModal
+        isOpen={isSummaryOpen}
+        onClose={() => setIsSummaryOpen(false)}
+        summary={summaryData}
+        onDownloadDocx={handleDownloadDocx}
+        onDownloadEvidence={handleDownloadEvidence}
+        onArchive={handleArchiveSession}
       />
     </div>
   );

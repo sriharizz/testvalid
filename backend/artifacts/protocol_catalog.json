@@ -1,0 +1,43 @@
+{
+  "onepv": [
+    {
+      "filename": "CLIN-PQ-DIRECT-TEST - Direct Studio Protocol.docx",
+      "document_no": "CLIN-PQ-DIRECT-TEST",
+      "protocol_type": "PQ",
+      "size_kb": 37.1,
+      "step_count": 1,
+      "updated_at": "Just now (Studio)",
+      "product_id": "onepv"
+    },
+    {
+      "filename": "CLIN-PQ-STUDIO-001 - Direct Studio Protocol.docx",
+      "document_no": "CLIN-PQ-STUDIO-001",
+      "protocol_type": "PQ",
+      "size_kb": 37.4,
+      "step_count": 3,
+      "updated_at": "Just now (Studio)",
+      "product_id": "onepv"
+    },
+    {
+      "filename": "CLIN-EU-PAT-OPV-1-1-PQ-022- Manual - Registering Adverse Event Case.docx",
+      "document_no": "CLIN-EU-PAT-OPV-1-1-PQ-022",
+      "protocol_type": "PQ",
+      "size_kb": 277.5,
+      "step_count": 18,
+      "updated_at": "Just now",
+      "product_id": "onepv"
+    },
+    {
+      "filename": "CLIN-EU-VAL-OPV-1-1-OQ-036 - Manual - Registering Adverse Event Case.docx",
+      "document_no": "CLIN-EU-VAL-OPV-1-1-OQ-036",
+      "protocol_type": "OQ",
+      "size_kb": 299.6,
+      "step_count": 50,
+      "updated_at": "Just now",
+      "product_id": "onepv"
+    }
+  ],
+  "signal": [],
+  "1pv": [],
+  "custom": []
+}
