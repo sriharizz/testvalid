@@ -238,3 +238,24 @@ Append one entry per phase attempt. Record observed evidence, not plans or assum
 - **Security/data integrity:** Real patient information and credentials are excluded from prompts; synthetic values are run-scoped and marked. Source protocol content was not changed. Development catalog records are candidates; unique/actionable Playwright locator recipes have not been verified. No Save, Submit or other business mutation occurred.
 - **Limitations:** Catalog coverage is incomplete; dropdown runtime search still needs a unique enabled live match; Product Name (English) is marked disabled and must be reviewed before use. Phase 4 does not prove Playwright execution correctness.
 - **Next action:** Phase 4 is complete and awaits human approval. Do not start Phase 5 without explicit authorization.
+
+### 2026-11-06T11:10:00+05:30 — Portal Execution Service Wiring & Dev OnePV Live Configuration
+
+- **Agent/tool:** Antigravity / Playwright Python (Edge channel `msedge`, headed mode `PW_HEADED=1`).
+- **Authorization:** User directed live integration of frontend portal, login page, folder explorer, and Dev OnePV execution runner (`https://dev.one-aipv.com`).
+- **Changed files:**
+  - `backend/app/services/execution/portal_execution_service.py`: automated pre-flight login, headed Microsoft Edge (`head=1`) launch, Dev OnePV Angular form control selectors (`#username`, `#loginpassword`, `#enterpriseName`), error toast detection (`E-20002`), screenshot sidecar persistence (`backend/artifacts/screenshots/{session_id}/`), and live JPEG viewport streaming (`FRAME`).
+  - `backend/main.py`: replaced legacy runner with `PortalExecutionService`; added `/api/session-summary/{session_id}` endpoint; wired `/api/execute/{session_id}` directly with user credentials and headed Edge flags.
+  - `backend/products.py`: pointed primary `onepv` configuration to `https://dev.one-aipv.com` (landing at `/dashboard/Intake/Manual%20Case%20Registration`).
+  - `backend/.env`: updated `TARGET_APP_URL="https://dev.one-aipv.com"`, `PW_CHANNEL="msedge"`, and `PW_HEADED="1"`.
+  - `frontend/src/components/LoginPage.tsx`: restored login screen, removed legacy simulation toggles, and added the Visible Microsoft Edge Window (head=1) control.
+  - `frontend/src/App.tsx`: synchronized Dev OnePV URL defaults and headed browser state.
+- **Verification:**
+  - Backend test suite: `pytest backend/tests/ -q --tb=short` -> 66 passed in 45.00s.
+  - Frontend TypeScript build: `npm --prefix frontend run build` -> 0 errors, built in 7.82s.
+  - Probed live Dev OnePV in headed Edge: HTTP 200 OK, loaded `ClinevoOnePVFrontend`, verified form control detection and Oracle error toast interception.
+- **Services running:**
+  - FastAPI Backend: `http://127.0.0.1:8000` (task-953).
+  - Frontend Vite Dev Server: `http://localhost:5173` (task-973).
+- **Git status:** Cleanly committed and pushed to GitHub `origin/v5` (`https://github.com/sriharizz/testvalid.git`, commit `e8b162c`). GitLab untouched.
+- **Next action:** Stopped; awaiting user verification on live Dev OnePV.
