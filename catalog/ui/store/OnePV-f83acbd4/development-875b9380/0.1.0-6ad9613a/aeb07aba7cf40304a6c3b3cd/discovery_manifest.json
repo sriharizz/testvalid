@@ -1,0 +1,144 @@
+{
+  "manifest_version": "0.1.0",
+  "task": "Initial OnePV UI catalogue discovery",
+  "created_on": "2026-11-04",
+  "environment": "development",
+  "application_url": "https://dev.one-aipv.com",
+  "method": "Codex in-app Browser; read-only screen and accessibility inspection.",
+  "scope": {
+    "requested_intake_modules": [
+      "Manual Case Registration",
+      "Open Case",
+      "Case Revision Search"
+    ],
+    "user_added_modules": [
+      "Case Deletion",
+      "Reports > Case Explorer",
+      "Reports > Audit History",
+      "Reports > General Line Listing"
+    ],
+    "excluded": [
+      "Calls",
+      "Emails",
+      "Dashboard",
+      "other Admin modules"
+    ]
+  },
+  "pages": [
+    {
+      "name": "Manual Case Registration",
+      "path": "/dashboard/Intake/Manual%20Case%20Registration",
+      "status": "observed",
+      "limitations": [
+        "Adverse Event dropdowns were opened; large lists are represented by count and runtime search.",
+        "Dropdowns only were inspected for General Inquiry, Medical Inquiry, MI with AE, and Product Quality Complaint.",
+        "PQC with AE and PQC with MI remain uninspected."
+      ]
+    },
+    {
+      "name": "Open Case",
+      "path": "/dashboard/Intake/Open%20Case",
+      "status": "observed",
+      "limitations": [
+        "No search criteria entered; no search run.",
+        "Searchable product and country options recorded by count, not exhaustive values."
+      ]
+    },
+    {
+      "name": "Case Revision Search",
+      "path": "/dashboard/Intake/Case%20Revision%20Search",
+      "status": "observed",
+      "limitations": [
+        "No case number entered; no search run."
+      ]
+    },
+    {
+      "name": "Case Deletion",
+      "path": "/dashboard/Intake/Case%20Deletion",
+      "status": "observed",
+      "limitations": [
+        "No case number entered; no search run."
+      ]
+    },
+    {
+      "name": "Case Explorer",
+      "path": "/dashboard/Intake/Reports/Case%20Explorer",
+      "status": "observed",
+      "limitations": [
+        "No search criteria entered; no search run.",
+        "Searchable product, country and workflow values are partial inventories."
+      ]
+    },
+    {
+      "name": "Audit History",
+      "path": "/dashboard/Intake/Reports/Audit%20History",
+      "status": "observed",
+      "limitations": [
+        "No case number entered; no search run."
+      ]
+    },
+    {
+      "name": "General Line Listing",
+      "path": "/dashboard/Intake/Reports/General%20Line%20Listing",
+      "status": "observed_with_data_minimization",
+      "limitations": [
+        "Nine saved listing definitions were visible.",
+        "Saved names, descriptions, SQL text, timestamps and user names were excluded.",
+        "Operator options were not exposed before selecting a Column; no Column was selected."
+      ]
+    }
+  ],
+  "safe_actions_performed": [
+    "Navigated among authorized development UI pages.",
+    "Opened and closed dropdowns without selecting values.",
+    "Opened the General Line Listing filter UI to inspect field labels and available Column options.",
+    "Temporarily changed the top form selector to General Inquiry, Medical Inquiry, MI with AE, and Product Quality Complaint to inspect dropdown fields; restored Adverse Event afterward.",
+    "Opened and closed alternate-variant dropdowns without selecting business values."
+  ],
+  "prohibited_or_not_performed": [
+    "No patient, reporter, case, or test values were entered.",
+    "No search, save, submit, add, reset, delete, or lookup action was activated.",
+    "No records were opened or changed.",
+    "Business dropdown values were not selected; form-type selections were temporary inspection state only."
+  ],
+  "evidence": {
+    "directory": "catalog/ui/evidence/",
+    "status": "not_saved",
+    "reason": "The user stopped Computer Use with the physical Escape key before screenshots could be transferred to the workspace. The user then asked to finish the catalogue using the observations already collected.",
+    "screenshot_files": [],
+    "notes": "Screenshots were not captured to local evidence files during this run; no image files are claimed."
+  },
+  "artifacts": [
+    "catalog/ui/application_catalog.json",
+    "catalog/ui/application_catalog.md",
+    "catalog/ui/discovery_manifest.json",
+    "catalog/ui/evidence/README.md"
+  ],
+  "acceptance": {
+    "section_scoped_field_map": true,
+    "visible_control_types_recorded": true,
+    "visible_required_markers_recorded": true,
+    "dropdown_inventory_recorded_with_large_lists_marked_partial": true,
+    "screenshots_saved": false,
+    "conditional_form_variants_explored": false,
+    "adverse_event_dropdown_controls_checked": true,
+    "country_and_formulation_runtime_search_verified": true,
+    "large_option_values_intentionally_omitted": true,
+    "alternate_variant_dropdown_maps_recorded": true,
+    "all_form_variants_explored": false
+  },
+  "option_policy": "Large option lists with an observed Search textbox are recorded by field, section, count and search affordance; use the exact test-case value at runtime and require a unique match. Do not store or prompt with every option.",
+  "variant_inspection": {
+    "dropdowns_only": [
+      "General Inquiry",
+      "Medical Inquiry",
+      "MI with AE",
+      "Product Quality Complaint"
+    ],
+    "dropdowns_not_inspected": [
+      "PQC with AE",
+      "PQC with MI"
+    ],
+    "outcome": "Maps stored in application_catalog.json with shared option-set references."
+  }
+}

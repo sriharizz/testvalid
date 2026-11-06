@@ -3,8 +3,10 @@ node_modules/
 .venv/
 venv/
 env/
+node-v*/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Environment & Secrets
 .env
@@ -20,10 +22,23 @@ build/
 # Artifacts & Screenshots
 backend/artifacts/screenshots/
 backend/artifacts/temp/
+backend/artifacts/plan_cache/
+backend/artifacts/qwen_evaluations/
+backend/artifacts/generated_*.spec.ts
 *.tmp
+
+# Local uploaded protocol documents contain user-provided source material.
+backend/uploads/*
 
 # IDE & OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Phase build cards are tracked project instructions, not generated build output.
+!harness/build/
+!harness/build/*.md
+
+backend/artifacts/archive/
+backend/legacy_tests_archive/

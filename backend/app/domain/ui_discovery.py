@@ -31,6 +31,8 @@ class UIControlObservation(StrictModel):
     control_type: str
     accessible_name: str | None = None
     label: str | None = None
+    label_match_status: Literal["associated", "missing"] = "missing"
+    section_path: list[str] = Field(default_factory=list)
     placeholder: str | None = None
     input_type: str | None = None
     required: bool | None = None
@@ -78,6 +80,15 @@ class UIRelationshipObservation(StrictModel):
     evidence: list[DiscoveryEvidence] = Field(default_factory=list)
 
 
+class UITextObservation(StrictModel):
+    text: str
+    kind: str
+    tag: str
+    section_id: str | None = None
+    locator_recipe: str
+    lifecycle: DiscoveryLifecycle = "observed"
+
+
 class UIScreenObservation(StrictModel):
     screen_id: str
     url: str
@@ -86,15 +97,17 @@ class UIScreenObservation(StrictModel):
     lifecycle: DiscoveryLifecycle = "observed"
     sections: list[UISectionObservation] = Field(default_factory=list)
     controls: list[UIControlObservation] = Field(default_factory=list)
+    form_fields: list[UIControlObservation] = Field(default_factory=list)
     tables: list[UITableObservation] = Field(default_factory=list)
     relationships: list[UIRelationshipObservation] = Field(default_factory=list)
     dialog_labels: list[str] = Field(default_factory=list)
+    texts: list[UITextObservation] = Field(default_factory=list)
     evidence: list[DiscoveryEvidence] = Field(default_factory=list)
 
 
 class DiscoveryIssue(StrictModel):
     code: str
-    status: Literal["inaccessible", "not_safely_discoverable", "partial", "unsupported"]
+    status: Literal["inaccessible", "not_safely_discoverable", "partial", "unsupported", "incomplete"]
     summary: str
     source_url: str | None = None
     evidence: list[DiscoveryEvidence] = Field(default_factory=list)
@@ -117,5 +130,9 @@ class UIDiscoveryResult(StrictModel):
     live_discovery: bool
     browser_channel: str
     environment_label: str
+    discovery_status: Literal["COMPLETED", "PARTIAL", "INCOMPLETE"] = "COMPLETED"
+    workflow_scope: str | None = None
+    workflow_match_status: Literal["not_requested", "reached", "not_found", "ambiguous"] = "not_requested"
+    form_fields: list[UIControlObservation] = Field(default_factory=list)
     screens: list[UIScreenObservation] = Field(default_factory=list)
     coverage: DiscoveryCoverage

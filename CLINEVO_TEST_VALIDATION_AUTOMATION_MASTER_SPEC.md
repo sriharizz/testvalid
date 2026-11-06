@@ -7,7 +7,7 @@
 **Updated:** 2026-11-04  
 **Primary implementation language:** Python  
 **Browser automation:** Playwright for Python (async API preferred)  
-**AI planning model:** Qwen, supplied through a configurable model-serving adapter  
+**AI field-data model:** Qwen, supplied through a configurable model-serving adapter
 **Backend integration:** Preserve the existing frontend experience and compatible API/data contracts after a bounded inspection; rebuild legacy backend logic where necessary.  
 **Intended users:** AI coding agents (Codex, Claude Code, Cursor, Windsurf, etc.), engineers, reviewers, QA and validation stakeholders.
 
@@ -224,10 +224,10 @@ PROTOCOL QUALITY / SAFETY GATE                     PLAYWRIGHT UI DISCOVERY MODE
 | Canonical protocol layer | Authoritative normalized test representation | UI-specific locator execution |
 | UI discovery engine | Read-only traversal of authorised live UI; raw observations, coverage and candidate metadata | Owning the durable approved catalog, planning tests, compiling actions or executing test scenarios |
 | UI catalog | Versioned UI metadata, navigation relationships and lifecycle state; controlled persistence/promotion | Crawling the application, storing patient/case records or credentials, planning or executing tests |
-| UI Mini-RAG | Retrieving relevant, scoped catalog records for planning | Discovering/crawling live UI, mutating catalog records, rewriting source protocols or inventing expected results |
-| Qwen Planner | Semantic interpretation and structured plan proposal | Direct browser access, arbitrary code or final verdict |
-| Plan validator | Schema, policy, environment, data and locator checks | Guessing missing business requirements |
-| Generator/compiler | Compile validated plan to the Python runner's action DSL | Generating unrestricted executable code |
+| UI Mini-RAG | Retrieving relevant, scoped catalog records for synthetic field-data generation | Discovering/crawling live UI, mutating catalog records, rewriting source protocols or inventing expected results |
+| Qwen synthetic-data generator | Map the source test to retrieved UI cards; return compact, source-grounded action intents and synthetic field values | Browser access, executable code, assertions, evidence plans or final verdict |
+| Data-output validator | Validate target card IDs/section paths, field IDs, control state and value provenance | Guessing missing business requirements or executing controls |
+| Deterministic compiler/runner | Combine the canonical protocol, validated data map and UI catalog into allow-listed Python Playwright operations | Generating unrestricted executable code |
 | Playwright runner | Deterministic navigation, actions and observations | Deciding PASS from a click succeeding |
 | Qwen Healer | Suggest locator/control mapping for unfamiliar UI | Silently changing acceptance criteria or trusted cache |
 | Evidence engine | Preserve original checkpoint artefacts and metadata | Changing raw evidence after capture |
@@ -240,7 +240,7 @@ The initial system uses **one primary UI Mini-RAG** backed by a complete, versio
 
 ## 3.4 Python execution is the primary runtime
 
-The production browser runner is Python Playwright. The Generator must produce a typed JSON action plan / Python-compatible execution DSL. Do not create TypeScript code as the required execution format. A TypeScript export can be added later only if the product has a genuine external need for it.
+The production browser runner is Python Playwright. Qwen returns typed, source-grounded action intents that reference retrieved screen/section keys, plus a field-value map. Deterministic Python validates those intents against the source, catalog and allow-list, then compiles them to the action DSL. Qwen never creates executable code or the action DSL. Do not create TypeScript code as the required execution format.
 
 ## 3.5 Clean backend architecture; preserve the frontend contract
 
@@ -271,25 +271,24 @@ Purpose: build and refresh knowledge about the application's reachable UI.
 - Never submits, saves, deletes, approves, signs, sends or mutates real business records just to discover the UI.
 - Records what was discovered, what was not reachable and why.
 
-## 4.2 Planning mode
+## 4.2 Synthetic field-data generation mode
 
-Purpose: compile an authored or uploaded protocol into a safe, reviewable action plan.
+Purpose: provide a compact, validated data map and destination for deterministic Playwright execution.
 
-- Uses the canonical protocol, relevant UI Mini-RAG cards and approved synthetic test-data fixture references.
+- Uses the unchanged canonical procedure steps and relevant UI Mini-RAG screen/section/field cards.
 - Reads catalog content through Mini-RAG; it does not traverse the live UI or write catalog records.
-- Produces a proposed typed plan for deterministic validation; it does not compile or execute browser actions.
-- Does not control the browser.
-- Does not alter the source protocol.
-- Produces a validated plan, not Python/JavaScript code.
-- Marks uncertain instructions as `NEEDS_REVIEW`.
+- Returns compact action intents (navigate screen, open/fill section, or click an explicitly named control) plus field-ID/value pairs. Intents cite source steps and retrieved screen/section keys; click text must be grounded in the cited source. It does not return locators, executable code, assertions, evidence plans or verdicts.
+- Preserves explicit source values and intentional blanks; generates clearly fictional values only for requested or required enabled fields.
+- Marks generated values `qwen_synthetic`; the validator checks referenced UI cards, section paths, control state and value provenance.
+- Does not control the browser or alter the source protocol. Uncertain fields/targets are marked `NEEDS_REVIEW`.
 
 ## 4.3 Execution mode
 
-Purpose: execute an approved plan against a declared environment.
+Purpose: execute the canonical procedure using a validated screen/section target and field-value map against a declared environment.
 
 - Uses isolated Playwright browser contexts.
 - Uses an authorized run identity and credentials injected at runtime from an approved secret provider; credentials are not submitted by the browser as trusted execution secrets.
-- Executes only allow-listed actions compiled from a validated plan. Execution does not perform discovery traversal or promote catalog records.
+- Validates and compiles Qwen's source-grounded intents, canonical procedure and value map against the UI catalog and allow-listed action DSL. It does not perform discovery traversal or promote catalog records.
 - Captures evidence at defined checkpoints.
 - Verifies each expected result deterministically.
 - Stops on unsafe ambiguity or unrecoverable execution errors.
@@ -479,8 +478,8 @@ Represent each checkpoint in order and preserve the relationship between interme
 - Do not use regex or `if "reporter" in text` rules to interpret arbitrary prose.
 - Structural parsing can identify document tables, numbered scenario IDs, explicit field/value formats and cross-references, but must preserve their raw text.
 - Qwen may normalize semantic intent into the canonical schema.
-- Qwen may not invent missing expected results, mandatory fields, application rules or values.
-- If a source instruction is vague (for example, `(Enter the data)`), resolve the value from an approved synthetic fixture or test-data policy. If none exists, flag it for author/reviewer input.
+- Qwen may not invent missing expected results, mandatory fields, application rules or explicit source values. Under Section 11, it may generate clearly fictional values for requested or required enabled fields, with `qwen_synthetic` provenance.
+- If a source instruction is vague (for example, `(Enter the data)`), use an approved fixture or let the Phase 4 synthetic-data generator supply a clearly fictional value with provenance. If neither is available, flag it for author/reviewer input.
 - Explicitly blank fields in negative tests must remain blank; never auto-fill them because a field appears mandatory.
 - Cross-references such as “Refer expected result 1” must be represented as links between procedure substeps and the relevant checkpoint, not discarded.
 - No keyword-, phrase-, regex- or fixed ambiguity-word filtering is permitted. Do not infer ambiguity or irrelevance from words such as “appropriate,” “relevant,” “details,” “some,” “below” or “select” alone. Assess meaning only in context; if context cannot be established, preserve the source and leave interpretation unresolved.
@@ -798,7 +797,7 @@ Start with a lightweight CPU-based retriever appropriate for structured UI metad
 - Optional embeddings only if an offline evaluation demonstrates materially better retrieval quality and acceptable operational cost.
 - Do not add a vector database solely because the project contains the word RAG.
 
-Use a relevance threshold and return source references/scores. If no relevant card meets the threshold, the planner must not pretend the screen is known; it may request live discovery or mark the plan `NEEDS_REVIEW`.
+Use a relevance threshold and return source references/scores. If no relevant card meets the threshold, the generator must not pretend the screen is known; it may request live discovery or mark the target `NEEDS_REVIEW`.
 
 ## 9.5 Dropdown retrieval policy
 
@@ -818,22 +817,21 @@ Context control is an architectural requirement. A complete UI catalog can be la
 
 ## 10.1 Principle
 
-**Index broadly; retrieve narrowly; send only what the current planning unit needs.**
+**Index broadly; retrieve narrowly; send only what the current field-data generation unit needs.**
 
 A large local UI inventory does not imply a large LLM prompt.
 
 ## 10.2 Prompt context contents
 
-For a planning unit, include only:
+For a field-data generation unit, include only:
 
 - The complete original procedure text for the selected scenario(s).
-- The complete expected-result text and linked checkpoint context.
-- Preconditions and scenario dependencies relevant to that unit.
+- Preconditions and scenario instructions needed to generate the requested field values.
 - Relevant UI navigation path and section cards.
 - Relevant field/control cards.
 - Relevant dropdown option candidates (not all catalog options).
-- Approved fixture references/values necessary for planning (synthetic and non-sensitive).
-- Action/verification schema and safety constraints.
+- Approved fixture references/values necessary for generation (synthetic and non-sensitive).
+- The field-data output schema and safety constraints.
 
 Do not include:
 
@@ -869,7 +867,7 @@ Do not use a fixed `<=25` steps as the principal batching rule.
 - Preserve the original scenario execution order unless an approved change explicitly permits reordering.
 - Keep compound scenarios and their checkpoint trajectories together.
 - Use the tokenizer budget to decide batch size.
-- If a planning unit exceeds budget, split between independent scenarios or at an explicitly modelled checkpoint boundary.
+- If a generation unit exceeds budget, split only between independent scenarios; do not split or rewrite a source scenario to fit the prompt.
 - Never split a compound scenario in a way that loses its state trajectory or dependency context.
 - Never silently truncate original procedure or expected-result content.
 - Record the batch membership, token count, model/config version and source scenario IDs.
@@ -905,44 +903,38 @@ If a context budget is exceeded, split or retrieve less irrelevant material; do 
 
 ---
 
-# 11. Qwen Planner and Structured Plan Generation
+# 11. Qwen Synthetic Field-Data Generation
 
 ## 11.1 Qwen's role
 
-Qwen is the **semantic protocol compiler/planner**. It is not a free-roaming browser agent and is not the verifier.
+Qwen is a **source-grounded intent and synthetic form-data generator with UI context**. It is not a browser agent, executable action planner or verifier.
 
-It receives canonical test content plus relevant UI context and produces a structured plan describing:
+It receives the original procedure text plus only the relevant, scoped Mini-RAG cards. Its compact response contains:
 
-- Navigation path.
-- Field/control targets.
-- Action sequence.
-- Value provenance.
-- Dependencies and runtime variables.
-- Pre-action checks.
-- Expected-result checkpoint references.
-- Evidence checkpoints.
-- Ambiguities and missing information.
+- Typed intent proposals for navigating to a retrieved screen, opening/filling a retrieved section, and clicking an explicitly named control.
+- Source-step references for each intent. Screen/section targets are short prompt-local keys that Python resolves to retrieved catalog cards.
+- Field-card IDs and values to enter.
+- Value provenance and unresolved field/target reasons.
 
-## 11.2 Test-data policy
+Intent proposals are not executable DSL or code. A click target must be present in its cited source step. It must not produce locators, Playwright code, assertions, evidence plans or PASS/FAIL. Python validates the intents against the source and retrieved UI context before compiling allowed actions.
 
-The earlier “100% Qwen data synthesis” requirement is superseded.
+## 11.2 Synthetic test-data policy
 
-Qwen must not invent clinical or personal data merely because a field needs a value. Values must originate from:
+For this validation platform, Qwen is authorized to generate **clearly fictional synthetic test values** when the procedure needs data and supplies none. This explicitly supersedes the previous prohibition on AI-generated synthetic values. It does not authorize sending real patient data to Qwen or generating facts for use outside controlled software validation.
 
-1. Explicit values in the approved protocol, or
-2. Approved synthetic test-data fixtures/data factory, or
-3. Explicit author/reviewer input, or
-4. An approved deterministic runtime value provider (for example, a test-run date parameter where the protocol specifies relative timing).
+- Preserve exact values and intentional blanks stated in the source.
+- Generate values only for enabled fields requested by the source or required within an explicitly targeted section. Do not populate unrelated optional fields.
+- Mark generated values with `qwen_synthetic`; mark exact source values with `protocol_explicit`; mark source-directed empty values with `intentionally_blank`.
+- Use obviously fictional values (for example, names containing “Test” and reserved example domains); do not use real patient identities or claim a synthetic value is real.
+- Do not invent dropdown options. Use exact option candidates supplied in context or return a `runtime_search` request that Playwright must resolve to one unique live option before selection.
+- Never send actual PHI/PII, credentials, cookies, tokens or secrets in prompts. Synthetic output values are run-scoped validation data and must not be confused with real patient records.
+- Synthetic values are for authorized non-production validation by default. Existing organisational environment and production-mutation gates still apply.
 
-Qwen may map fixture fields to UI fields and select among approved fixture values. Every applied value must have provenance:
+Value provenance is limited to:
 
 - `protocol_explicit`
-- `approved_fixture`
-- `runtime_parameter`
+- `qwen_synthetic`
 - `intentionally_blank`
-- `reviewer_supplied`
-
-Do not use `ai_synthesized_mandatory` as permission to fabricate clinical facts. If the source does not define a required value and no approved fixture exists, mark `NEEDS_REVIEW`.
 
 ## 11.3 Credentials and authentication
 
@@ -961,61 +953,56 @@ After receiving model output:
 
 1. Parse JSON.
 2. Validate against the exact schema.
-3. Reject unknown action types/fields where appropriate.
-4. Validate every referenced scenario/checkpoint/card/fixture ID.
-5. Validate value provenance.
-6. Validate locator recipes against catalog evidence.
-7. Validate environment and mutation policy.
-8. Validate action order and dependencies.
-9. Validate that required checkpoints have assertions/evidence mappings.
-10. If invalid, permit at most one bounded repair attempt using the validation errors; if still invalid, mark `NEEDS_REVIEW`/`BLOCKED` and do not execute.
+3. Validate each intent kind, included source-step reference and retrieved screen/section target. A click target must appear in its cited source step.
+4. Reject locators, executable code, assertions, evidence and verdict fields.
+5. Validate that every screen, section and field ID exists in the retrieved context and that section paths match the catalog.
+6. Reject disabled or non-data-entry controls and duplicate field IDs.
+7. Validate source-explicit values, synthetic provenance, intentional blanks and dropdown resolution mode.
+8. Validate environment and mutation policy.
+9. If output is malformed or invalid, mark `NEEDS_REVIEW`; do not spend another model call on repair by default.
 
 Use deterministic low-variance settings where supported, but do not assume temperature zero guarantees correctness.
 
-## 11.5 Planner output contract (illustrative)
+## 11.5 Field-data output contract (illustrative)
 
 ```json
 {
-  "plan_id": "plan-id",
-  "protocol_id": "protocol-id",
-  "protocol_version": "1.0",
-  "environment": "Validation",
-  "model_info": {
-    "model_name": "configured-qwen-model",
-    "runtime_version": "configured-runtime",
-    "prompt_version": "planner-v1"
-  },
-  "scenario_plans": [
+  "status": "ready",
+  "action_intents": [
+    {"kind": "navigate_screen", "target_ref": "retrieved-screen-card-id", "source_step_ref": "source-step-ref"},
+    {"kind": "open_section", "target_ref": "retrieved-section-card-id", "source_step_ref": "source-step-ref"},
+    {"kind": "fill_section", "target_ref": "retrieved-section-card-id", "source_step_ref": "source-step-ref"},
+    {"kind": "click_control", "target_text": "Save", "source_step_ref": "source-step-ref"}
+  ],
+  "navigation_targets": [
     {
-      "scenario_id": "1.1.38",
-      "actions": [
-        {
-          "action_id": "action-1",
-          "type": "click",
-          "target_control_ref": "activity-log-delete-control",
-          "source_step_ref": "source-step-ref"
-        }
-      ],
-      "checkpoints": [
-        {
-          "checkpoint_id": "checkpoint-1",
-          "assertion_spec_ref": "assertion-spec-ref",
-          "evidence_required": ["screenshot", "observed_state"]
-        }
-      ],
-      "ambiguities": []
+      "screen_id": "retrieved-screen-id",
+      "screen_card_id": "retrieved-screen-card-id",
+      "section_card_id": "retrieved-section-card-id",
+      "section_path": ["retrieved section"]
     }
-  ]
+  ],
+  "field_values": [
+    {
+      "field_ref": "retrieved-field-card-id",
+      "field_label": "retrieved field label",
+      "value": "clearly fictional synthetic value",
+      "value_mode": "direct",
+      "provenance": "qwen_synthetic",
+      "source_step_ref": "source-step-ref"
+    }
+  ],
+  "unresolved": []
 }
 ```
 
-This is an illustration of shape, not a hardcoded OnePV test plan.
+This is an illustration of shape, not a hardcoded application or test case. Intents are semantic proposals, not executable DSL or browser code; Python validates and compiles them.
 
 ---
 
-# 12. Plan Compiler and Python Action DSL
+# 12. Deterministic Python Action Compiler
 
-The generator must compile the validated plan into a constrained execution format consumed by the Python runner.
+The Python compiler combines the source-preserving canonical procedure, validated Qwen action intents and synthetic field-value map, and versioned UI catalog. It creates a constrained execution format for the Python Playwright runner. Qwen does not author the executable action format.
 
 ## 12.1 Allowed action types
 
@@ -1041,9 +1028,9 @@ Define and validate a small, explicit action vocabulary, such as:
 
 The exact list is frozen in code and validated. Add new action types only through a reviewed change.
 
-## 12.2 Forbidden plan output
+## 12.2 Forbidden Qwen output
 
-Reject plans containing:
+Reject Qwen responses containing:
 
 - Arbitrary Python/JavaScript source.
 - `eval`/`exec` instructions.
@@ -1052,8 +1039,9 @@ Reject plans containing:
 - Unapproved API/database mutations.
 - Unapproved file-system commands.
 - Credentials/secrets.
-- Unmapped test data.
-- Unreferenced locators.
+- Values for fields outside retrieved UI context.
+- Unreferenced screen/section/field IDs.
+- Values without valid source or `qwen_synthetic` provenance.
 - A final PASS/FAIL label generated by Qwen.
 
 ## 12.3 Locator recipe
@@ -1524,7 +1512,7 @@ Before any production mutation, require:
 - Authorised role and least-privilege access.
 - Defined data retention and cleanup or retention strategy.
 - Approved run window and monitoring where required.
-- Human approval of the exact action plan where policy requires it.
+- Human approval of the deterministic compiled actions where policy requires it.
 
 If not satisfied, permit only approved read-only activities. PQ example protocols explicitly use Production, so this gate is mandatory.
 
@@ -1613,7 +1601,7 @@ backend/
       discovery/         # Playwright UI discovery and inventory
       catalog/           # versioned UI catalog repository
       retrieval/         # single UI Mini-RAG retriever
-      planning/          # Qwen Planner and structured outputs
+      data_generation/   # Qwen-generated field values and navigation targets
       compilation/       # action DSL compiler/validator
       execution/         # Playwright runner and action dispatcher
       healing/           # on-demand locator recovery
@@ -1695,7 +1683,7 @@ Use correlation IDs (`run_id`, `scenario_id`, `checkpoint_id`, `evidence_id`) co
 | DOCX file corrupt/unsupported | Preserve original, report extraction failure, do not plan |
 | Filename/header protocol ID mismatch | Flag identity conflict and BLOCK controlled execution pending review |
 | Missing expected result | NEEDS_REVIEW; do not invent an oracle |
-| Qwen malformed JSON | One bounded schema-repair attempt; then stop planning |
+| Qwen malformed/invalid field-data JSON | Mark `NEEDS_REVIEW`; do not send a repair request |
 | Qwen hallucinates field/value | Reject unsupported references/provenance; NEEDS_REVIEW |
 | Retrieved UI card from wrong environment/build/role | Reject card and refresh discovery |
 | Dropdown requested value not in retrieved shortlist | Query full local/live option source; never choose a substitute silently |
@@ -1786,19 +1774,18 @@ Acceptance:
 - Ensure the true exact option can still be retrieved even if it was not in the first shortlist.
 - Measure retrieval precision/recall on a labelled test set; do not rely on assumed `<5ms` claims.
 
-## 23.4 Planner tests
+## 23.4 Synthetic field-data generation tests
 
-- Clear positive scenario.
-- Clear negative scenario.
-- Compound negative→positive scenario.
-- Positive setup→negative submit scenario.
-- Missing target test data.
-- Intentional blank field.
-- Unknown field not in catalog.
-- Ambiguous locator.
-- Malformed model response.
-- Unsupported action and invented value rejection.
-- Credential/PHI prompt redaction tests.
+- Source procedure is preserved exactly; expected-result text is not added to the data-generation prompt.
+- Named section resolves to the scoped screen/section and child field cards.
+- Output contains compact source-grounded action intents plus field-value pairs; locators, executable code, assertions, evidence and verdict fields are rejected.
+- Explicit source values are preserved and have `protocol_explicit` provenance.
+- Missing requested values receive clearly fictional `qwen_synthetic` provenance.
+- Intentional blanks remain explicit.
+- Unrequested optional, unknown and disabled fields are rejected or marked `NEEDS_REVIEW`.
+- Searchable dropdowns return runtime-search intents; invented options are rejected.
+- Malformed output is marked `NEEDS_REVIEW` without a repair call.
+- Real patient data, credentials and secrets are excluded from prompts.
 
 ## 23.5 Runner and verifier tests
 
@@ -1943,16 +1930,16 @@ Every phase has a scope, deliverables, test gates and a stop point. The agent mu
 
 **Stop:** run Phase 3 tests and obtain approval.
 
-## Phase 4 — Qwen Planner, fixture resolution and plan validation
+## Phase 4 — Qwen synthetic field-data generation and validation
 
 **Suggested modules:**
 
 - `infrastructure/qwen_client.py`
-- `services/planning/planner.py`
-- `services/planning/prompt_builder.py`
-- `services/planning/fixture_resolver.py`
-- `services/planning/plan_validator.py`
-- `schemas/plan.py`
+- `services/data_generation/generator.py`
+- `services/data_generation/prompt_builder.py`
+- `services/data_generation/validator.py`
+- `services/data_generation/input_adapter.py`
+- `schemas/data_generation.py`
 - Mock/model contract tests.
 
 **Deliverables:**
@@ -1960,17 +1947,18 @@ Every phase has a scope, deliverables, test gates and a stop point. The agent mu
 - Configurable Qwen provider/serving adapter.
 - Token-budgeted prompts with no source truncation.
 - Structured schema-constrained output where supported.
-- Positive/negative/compound planning.
-- Value provenance and explicit blank preservation.
-- Ambiguity handling.
-- Credential/PHI exclusion checks.
-- One bounded JSON repair attempt.
+- Section/screen navigation targets and field IDs for deterministic Playwright navigation.
+- Clearly fictional synthetic values for requested/required enabled fields.
+- Exact source values and intentional blank preservation.
+- Dynamic dropdown runtime-search intents and ambiguity handling.
+- Credential/real-patient-data exclusion checks.
+- Single model request; malformed or invalid response becomes `NEEDS_REVIEW` without a repair call.
 
-**Acceptance:** all planner tests in Section 23.4 pass; no generated value without approved provenance; no arbitrary action; no model-generated verdict.
+**Acceptance:** all field-data tests in Section 23.4 pass; action intents cite included source steps and retrieved screen/section cards; click target text is source-grounded; field targets refer to retrieved cards; generated values carry `qwen_synthetic` provenance; no locators, executable code, assertion, evidence plan or verdict appears in Qwen output.
 
 **Stop:** run Phase 4 tests and obtain approval.
 
-## Phase 5 — Plan compiler and deterministic Python Playwright runner
+## Phase 5 — Deterministic action compilation and Python Playwright runner
 
 **Suggested modules:**
 
@@ -1984,7 +1972,7 @@ Every phase has a scope, deliverables, test gates and a stop point. The agent mu
 
 **Deliverables:**
 
-- Allow-listed Python action DSL.
+- Validate and compile the canonical procedure, validated Qwen action intents and value map into an allow-listed Python action DSL.
 - Deterministic runner.
 - Semantic locator resolution and uniqueness checks.
 - Environment and role preflight.
@@ -2206,7 +2194,7 @@ AUTHORITATIVE SPECIFICATION
 Read `CLINEVO_TEST_VALIDATION_AUTOMATION_MASTER_SPEC.md` completely. It is the source of truth for the target architecture, safety rules, contracts, phases and acceptance criteria. The earlier `master_v5_production_spec.md` and old implementation are historical references only. If they conflict with this specification, follow this specification.
 
 MISSION
-Implement the system described in the master specification exactly and incrementally. The intended product accepts normal-English authored test cases and uploaded DOCX validation protocols, preserves their source and checkpoint semantics, discovers the authorised application UI beyond the landing page (including fields and dropdown options), retrieves bounded UI context through one primary Mini-RAG, uses Qwen to produce structured plans, executes only an allow-listed Python action DSL through deterministic Playwright, uses a controlled on-demand healer, captures checkpoint-level timestamped evidence, determines results through deterministic assertions, and generates traceable reports using approved templates.
+Implement the system described in the master specification exactly and incrementally. The intended product accepts normal-English authored test cases and uploaded DOCX validation protocols, preserves their source and checkpoint semantics, discovers the authorised application UI beyond the landing page (including fields and dropdown options), retrieves bounded UI context through one primary Mini-RAG, uses Qwen to return compact source-grounded action intents and synthetic field values, validates and compiles those intents in Python, executes them through Playwright, uses a controlled on-demand healer, captures checkpoint-level timestamped evidence, determines results through deterministic assertions, and generates traceable reports using approved templates.
 
 IMPORTANT LEGACY-CODE INSTRUCTION
 The existing codebase contains legacy implementation and hardcoded logic that may be poor quality. Do NOT spend tokens reading every source file or trying to understand every old implementation detail. Do NOT preserve old backend logic merely because it exists. Do NOT perform a bulk codebase audit.
@@ -2234,15 +2222,15 @@ NON-NEGOTIABLE ENGINEERING RULES
 - Fixed framework schemas, action allow-lists, safety policies and assertion primitives are required and are not prohibited hardcoding.
 - Preserve source document text and references. Never silently strip “noise” or truncate procedures/expected results.
 - Use token-budget-aware batching with the configured Qwen tokenizer; do not rely on a fixed 25-step batch limit.
-- Index the reachable authorised UI broadly, but retrieve only relevant deduplicated cards for each planning unit.
+- Index the reachable authorised UI broadly, but retrieve only relevant deduplicated cards for each field-data generation unit.
 - Initial UI discovery must reach nested menus/screens and inspect fields, native/custom dropdown options, tabs, grids, modals and accessible frames, using read-only behaviour by default.
 - Do not save/submit/delete/approve/sign/send or mutate real records during UI discovery.
-- Keep PHI/PII, credentials, cookies and tokens out of Qwen prompts, UI catalog and logs.
+- Keep real patient data/PHI, credentials, cookies and tokens out of Qwen prompts, UI catalog and logs. Qwen-generated validation values must be clearly fictional and carry synthetic provenance.
 - Authenticate and authorize protected HTTP, WebSocket and storage/report operations server-side. Resolve execution secrets through an approved runtime provider after authorization; never use browser-submitted passwords or secret defaults. Redact sensitive values and use explicit trusted-origin allow-lists for credentialed CORS.
 - Preserve existing frontend/API/WebSocket contracts by default. A breaking behavior or shape change requires explicit human approval, versioning, and a documented migration/rollback plan.
 - Treat the target package tree as conceptual; create each package only in the phase that implements it after that phase is explicitly authorized.
-- Qwen generates typed plans only; it never executes code or determines final PASS/FAIL.
-- Generator outputs a Python-compatible allow-listed action DSL, not executable TypeScript or arbitrary Python/JavaScript.
+- Qwen returns typed, source-grounded action intents and field-value pairs; it never returns locators or executable code, and it does not determine final PASS/FAIL.
+- The deterministic Python compiler produces the allow-listed action DSL; Qwen never emits executable TypeScript or arbitrary Python/JavaScript.
 - Playwright validates locator uniqueness, role, scope and actionability before acting.
 - The Healer proposes candidate recovery only; validate before execution and controlled cache promotion.
 - Capture original evidence at every required expected-result checkpoint. Store raw screenshots unchanged with sidecar metadata and SHA-256. Watermarks are derivatives only.
@@ -2310,8 +2298,8 @@ The most important invariants are:
 1. Both authored and uploaded tests converge on one canonical protocol model.
 2. The complete reachable authorised UI is inventoried beyond the landing page, including actual fields and safe dropdown option discovery.
 3. The UI catalog can be large; Qwen context remains small, relevant, deduplicated and token-budgeted.
-4. Test data has explicit provenance and is not invented by the model.
-5. Qwen plans; the Python compiler validates; Playwright executes.
+4. Qwen may generate clearly fictional test values with explicit `qwen_synthetic` provenance; real patient data is never sent to Qwen.
+5. Qwen returns compact source-grounded action intents and field values; deterministic Python validates and compiles them; Playwright executes.
 6. The Healer proposes; independent checks and approval determine reuse.
 7. Evidence is captured at each meaningful expected-result checkpoint, timestamped and integrity-protected.
 8. Deterministic assertions determine outcomes; an LLM never grants PASS.

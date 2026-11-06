@@ -1,0 +1,1978 @@
+{
+  "catalog_version": "0.1.0",
+  "application": {
+    "name": "OnePV",
+    "vendor": "Clinevo Technologies",
+    "environment": "development",
+    "base_url": "https://dev.one-aipv.com",
+    "discovered_on": "2026-11-04"
+  },
+  "discovery_method": "Read-only inspection of the rendered application through Codex in-app Browser; section names, field labels and control roles were taken from the visible UI/accessibility surface. No project crawler or implementation code was used.",
+  "data_handling": "No case identifiers, patient values, reporter values, credentials, or saved query contents are included. Search inputs were left blank.",
+  "navigation": {
+    "intake_group": [
+      "Manual Case Registration",
+      "Open Case",
+      "Case Revision Search"
+    ],
+    "user_requested_additions": [
+      {
+        "label": "Case Deletion",
+        "url_path": "/dashboard/Intake/Case%20Deletion"
+      },
+      {
+        "label": "Reports > Case Explorer",
+        "url_path": "/dashboard/Intake/Reports/Case%20Explorer"
+      },
+      {
+        "label": "Reports > Audit History",
+        "url_path": "/dashboard/Intake/Reports/Audit%20History"
+      },
+      {
+        "label": "Reports > General Line Listing",
+        "url_path": "/dashboard/Intake/Reports/General%20Line%20Listing"
+      }
+    ],
+    "excluded_without_inspection": [
+      "Calls",
+      "Emails",
+      "Dashboard",
+      "other Admin modules"
+    ]
+  },
+  "option_sets": {
+    "form_type": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 7,
+      "values": [
+        "Adverse Event",
+        "General Inquiry",
+        "Medical Inquiry",
+        "MI with AE",
+        "Product Quality Complaint",
+        "PQC with AE",
+        "PQC with MI"
+      ],
+      "searchable": true,
+      "search_input_label": "Search..."
+    },
+    "case_classification": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 9,
+      "values": [
+        "Un-select",
+        "Adverse Event",
+        "General Inquiry",
+        "MI with AE",
+        "Medical Inquiry",
+        "Multi Classification",
+        "PQC with AE",
+        "PQC with MI",
+        "Product Quality Complaint"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "intake_source": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 10,
+      "values": [
+        "Un-select",
+        "CAPA",
+        "CIOMS",
+        "Call",
+        "Deviation",
+        "Email",
+        "Literature",
+        "MEDWATCH",
+        "Other",
+        "Web Intake"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "title": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 5,
+      "values": [
+        "Un-select",
+        "Dr",
+        "Miss",
+        "Mr",
+        "Mrs"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "sex_code": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 4,
+      "values": [
+        "Un-select",
+        "Female",
+        "Male",
+        "Unknown"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "reporter_relationship": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 6,
+      "values": [
+        "Un-select",
+        "Manufacturer",
+        "Other",
+        "Patient/Parent",
+        "Self",
+        "Vaccine Provider"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "reporter_type": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 15,
+      "values": [
+        "Un-select",
+        "Company Representative",
+        "Consumer",
+        "Hospital",
+        "Lawyer",
+        "Non-Health Professional",
+        "Nurse",
+        "Other",
+        "Other Health Professional",
+        "Patient",
+        "Patient Carer",
+        "Pharmacist",
+        "Physician",
+        "Professor",
+        "Specialist"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "yes_no": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 3,
+      "values": [
+        "Un-select",
+        "No",
+        "Yes"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "seriousness_level": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 3,
+      "values": [
+        "Un-select",
+        "Non Serious",
+        "Serious"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "outcome_code": {
+      "kind": "static_dropdown",
+      "inventory_status": "runtime_search_list",
+      "visible_option_count": 18,
+      "searchable": true,
+      "search_input_label": "Search",
+      "sample_values": [
+        "Un-select",
+        "Fatal",
+        "Improved",
+        "Lasting Damage",
+        "Not Reported",
+        "Not recovered"
+      ],
+      "values_embedded": false,
+      "note": "18 options observed; the dropdown uses the Search control, so full values are intentionally not stored."
+    },
+    "case_status": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 6,
+      "values": [
+        "Un-select",
+        "Closed",
+        "Deleted",
+        "In Progress",
+        "Invalid",
+        "Open"
+      ],
+      "searchable": true,
+      "search_input_label": "Search"
+    },
+    "country_code": {
+      "kind": "searchable_dropdown",
+      "inventory_status": "runtime_search_verified",
+      "visible_option_count": 258,
+      "searchable": true,
+      "values_embedded": false,
+      "sample_values": [
+        "Un-select",
+        "Afghanistan",
+        "Albania",
+        "Algeria",
+        "American Samoa",
+        "Andorra"
+      ],
+      "note": "A Search textbox was observed in the live dropdown. Full values are intentionally omitted; search for the exact test-case value at runtime and verify the unique result.",
+      "search_input_label": "Search"
+    },
+    "product_name_catalog": {
+      "kind": "searchable_dropdown",
+      "inventory_status": "partial_searchable_list",
+      "visible_option_count": 67,
+      "searchable": true,
+      "values_embedded": false,
+      "note": "Product names are runtime catalog values; the full list is not copied into the UI catalogue.",
+      "search_input_label": "Search"
+    },
+    "formulation_code": {
+      "kind": "searchable_dropdown",
+      "inventory_status": "runtime_search_verified",
+      "visible_option_count": 706,
+      "searchable": true,
+      "values_embedded": false,
+      "note": "A Search textbox was observed in the live dropdown. Full values are intentionally omitted; search for the exact test-case value at runtime and verify the unique result.",
+      "search_input_label": "Search",
+      "sample_values": [
+        "Un-select",
+        "Absorbable coated sponge",
+        "Additive (unspecified)",
+        "Aerosol",
+        "Aerosol (Spray And Inhalation)",
+        "Alternative Form"
+      ]
+    },
+    "workflow_name": {
+      "kind": "searchable_dropdown",
+      "inventory_status": "partial_searchable_list",
+      "visible_option_count": 61,
+      "searchable": true,
+      "values_embedded": false,
+      "sample_values": [
+        "Un-select",
+        "Medical Inquiry Workflow",
+        "Safety Workflow",
+        "Adverse Event Workflow",
+        "Safety Workflow"
+      ],
+      "note": "Repeated visible labels were retained in the sample; do not treat the observed list as a canonical workflow registry.",
+      "search_input_label": "Search"
+    },
+    "listing_filter_column": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 7,
+      "values": [
+        "Un-select",
+        "Name",
+        "Description",
+        "SQL Text",
+        "Created On",
+        "Created By User",
+        "Updated By User"
+      ]
+    },
+    "listing_filter_operator": {
+      "kind": "dropdown",
+      "inventory_status": "not_observed_in_blank_filter",
+      "visible_option_count": 0,
+      "values": [],
+      "note": "No options were exposed before a column was selected; no column was selected."
+    },
+    "product_complaint_classification": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 12,
+      "searchable": true,
+      "search_input_label": "Search",
+      "values_embedded": true,
+      "values": [
+        "Un-select",
+        "Adverse Event (AE)",
+        "Compliance Issue",
+        "Consumer Complaint",
+        "Distribution Issue",
+        "Labeling Issue",
+        "Manufacturing Defect",
+        "Other",
+        "Packaging Issue",
+        "Product Quality",
+        "Regulatory Issue",
+        "Storage/Handling Issue"
+      ]
+    },
+    "product_complaint_category": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 8,
+      "searchable": true,
+      "search_input_label": "Search",
+      "values_embedded": true,
+      "values": [
+        "Un-select",
+        "Brand Image Concerns",
+        "Customer Service Issue",
+        "Dissatisfaction with Product",
+        "Inconvenient Packaging",
+        "Incorrect Use of Product",
+        "Other Consumer Complaint",
+        "Unmet Expectations"
+      ]
+    },
+    "pqc_status_code": {
+      "kind": "static_dropdown",
+      "inventory_status": "observed_visible_values",
+      "visible_option_count": 3,
+      "searchable": true,
+      "search_input_label": "Search",
+      "values_embedded": true,
+      "values": [
+        "Un-select",
+        "Closed",
+        "Open"
+      ]
+    }
+  },
+  "screens": [
+    {
+      "id": "manual_case_registration",
+      "name": "Manual Case Registration",
+      "module": "Intake",
+      "page_heading": "Intake",
+      "breadcrumb": "Intake > Manual Case Registration",
+      "url_path": "/dashboard/Intake/Manual%20Case%20Registration",
+      "coverage_status": "Adverse Event fully mapped; dropdown fields mapped for General Inquiry, Medical Inquiry, MI with AE, and Product Quality Complaint; PQC with AE and PQC with MI not inspected",
+      "top_level_fields": [
+        {
+          "id": "manual.form_type",
+          "label": "Form type",
+          "kind": "dropdown",
+          "required_marker_observed": false,
+          "enabled": true,
+          "option_set_ref": "form_type",
+          "initial_value": "Adverse Event"
+        }
+      ],
+      "variants": {
+        "selected": "Adverse Event",
+        "visible_options_ref": "form_type",
+        "inspected": [
+          "Adverse Event",
+          "General Inquiry",
+          "Medical Inquiry",
+          "MI with AE",
+          "Product Quality Complaint"
+        ],
+        "not_inspected": [
+          "PQC with AE",
+          "PQC with MI"
+        ],
+        "selection_was_transient": true,
+        "alternate_variant_scope": "Dropdown fields only; text fields were not recatalogued for the alternate variants."
+      },
+      "sections": [
+        {
+          "id": "general_info",
+          "name": "General Info",
+          "fields": [
+            {
+              "id": "manual.general_info.case_classifications_code",
+              "label": "Case Classifications Code",
+              "kind": "dropdown",
+              "required_marker_observed": true,
+              "enabled": true,
+              "option_set_ref": "case_classification",
+              "initial_value": "Adverse Event"
+            },
+            {
+              "id": "manual.general_info.case_intake_source_code",
+              "label": "Case Intake Source Code",
+              "kind": "dropdown",
+              "required_marker_observed": true,
+              "enabled": true,
+              "option_set_ref": "intake_source",
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.general_info.company_receipt_date",
+              "label": "Company Receipt Date",
+              "kind": "date",
+              "required_marker_observed": true,
+              "enabled": true,
+              "placeholder": "DD-MMM-YYYY"
+            },
+            {
+              "id": "manual.general_info.processing_center_received_date",
+              "label": "Processing Center Received Date",
+              "kind": "date",
+              "required_marker_observed": false,
+              "enabled": true,
+              "placeholder": "DD-MMM-YYYY"
+            }
+          ],
+          "subsections": [
+            {
+              "id": "questionnaire",
+              "name": "Questionnaire",
+              "fields": [],
+              "controls": [
+                {
+                  "label": "Add Questions",
+                  "kind": "button",
+                  "enabled": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "reporter",
+          "name": "Reporter",
+          "tab": "New",
+          "fields": [
+            {
+              "id": "manual.reporter.title",
+              "label": "Title",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "title",
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.reporter.first_name_english",
+              "label": "First Name(English)",
+              "kind": "text",
+              "required_marker_observed": true,
+              "enabled": true
+            },
+            {
+              "id": "manual.reporter.sex_code",
+              "label": "Sex Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "sex_code",
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.reporter.is_primary_reporter",
+              "label": "Is Primary Reporter",
+              "kind": "switch",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": true
+            },
+            {
+              "id": "manual.reporter.relationship_with_patient_code",
+              "label": "Relationship With Patient Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "reporter_relationship",
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.reporter.reporter_type_code",
+              "label": "Reporter Type Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "reporter_type",
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.reporter.is_reporter_health_care_professional",
+              "label": "Is Reporter Health Care Professional",
+              "kind": "switch",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": false
+            },
+            {
+              "id": "manual.reporter.address1_english",
+              "label": "Address1(English)",
+              "kind": "textarea",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.reporter.address2_english",
+              "label": "Address2(English)",
+              "kind": "textarea",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.reporter.city_english",
+              "label": "City(English)",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.reporter.state_english",
+              "label": "State(English)",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.reporter.country_code",
+              "label": "Country Code",
+              "kind": "dropdown",
+              "required_marker_observed": true,
+              "enabled": true,
+              "option_set_ref": "country_code",
+              "initial_value": "Select",
+              "selection_strategy": {
+                "mode": "runtime_dropdown_search",
+                "search_input_label": "Search",
+                "query_source": "explicit test-case value",
+                "require_unique_exact_match": true,
+                "verify_selected_label": true
+              }
+            },
+            {
+              "id": "manual.reporter.zipcode",
+              "label": "Zipcode",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.reporter.fax",
+              "label": "Fax",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.reporter.contact_number",
+              "label": "Contact Number",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.reporter.email_address",
+              "label": "Email Address",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            }
+          ]
+        },
+        {
+          "id": "patient",
+          "name": "Patient",
+          "fields": [
+            {
+              "id": "manual.patient.patient_initials",
+              "label": "Patient Initials",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.is_reporter_as_patient",
+              "label": "Is Reporter As Patient",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "yes_no",
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.patient.title",
+              "label": "Title",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "title",
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.patient.first_name_english",
+              "label": "First Name(English)",
+              "kind": "text",
+              "required_marker_observed": true,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.last_name_english",
+              "label": "Last Name(English)",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.occupation_english",
+              "label": "Occupation(English)",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.sex_code",
+              "label": "Sex Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "sex_code",
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.patient.date_of_birth",
+              "label": "Date of Birth",
+              "kind": "date",
+              "required_marker_observed": false,
+              "enabled": true,
+              "placeholder": "DD-MMM-YYYY"
+            },
+            {
+              "id": "manual.patient.address1_english",
+              "label": "Address1(English)",
+              "kind": "textarea",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.address2_english",
+              "label": "Address2(English)",
+              "kind": "textarea",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.state_english",
+              "label": "State(English)",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.country_code",
+              "label": "Country Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "country_code",
+              "initial_value": "Select",
+              "selection_strategy": {
+                "mode": "runtime_dropdown_search",
+                "search_input_label": "Search",
+                "query_source": "explicit test-case value",
+                "require_unique_exact_match": true,
+                "verify_selected_label": true
+              }
+            },
+            {
+              "id": "manual.patient.zipcode",
+              "label": "Zipcode",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.contact_number",
+              "label": "Contact Number",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "manual.patient.email_address",
+              "label": "Email Address",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            }
+          ]
+        },
+        {
+          "id": "product",
+          "name": "Product",
+          "tab": "New",
+          "fields": [
+            {
+              "id": "manual.product.product_name_english",
+              "label": "Product Name(English)",
+              "kind": "text",
+              "required_marker_observed": true,
+              "enabled": false,
+              "note": "Required marker is visible, but the textbox is disabled in the observed state."
+            },
+            {
+              "id": "manual.product.generic_name_english",
+              "label": "Generic Name(English)",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": false
+            },
+            {
+              "id": "manual.product.formulation_code",
+              "label": "Formulation Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "formulation_code",
+              "initial_value": "Select",
+              "selection_strategy": {
+                "mode": "runtime_dropdown_search",
+                "search_input_label": "Search",
+                "query_source": "explicit test-case value",
+                "require_unique_exact_match": true,
+                "verify_selected_label": true
+              }
+            },
+            {
+              "id": "manual.product.additional_drug_information_english",
+              "label": "Additional Drug Information(English)",
+              "kind": "textarea",
+              "required_marker_observed": false,
+              "enabled": true
+            }
+          ],
+          "controls": [
+            {
+              "label": "FAQ Template",
+              "kind": "link",
+              "enabled": true
+            },
+            {
+              "label": "Product Name lookup",
+              "kind": "icon_button",
+              "enabled": true,
+              "note": "Adjacent to disabled Product Name textbox; not opened."
+            }
+          ]
+        },
+        {
+          "id": "event_information",
+          "name": "Event Information",
+          "tab": "New",
+          "fields": [],
+          "subsections": [
+            {
+              "id": "event_information_details",
+              "name": "Event Information",
+              "fields": [
+                {
+                  "id": "manual.event_information.reaction_or_event_as_reported_english",
+                  "label": "Reaction Or Event As Reported(English)",
+                  "kind": "text",
+                  "required_marker_observed": true,
+                  "enabled": true
+                },
+                {
+                  "id": "manual.event_information.reported_term_english",
+                  "label": "Reported Term(English)",
+                  "kind": "text",
+                  "required_marker_observed": true,
+                  "enabled": true
+                },
+                {
+                  "id": "manual.event_information.start_date",
+                  "label": "Start Date",
+                  "kind": "date",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "placeholder": "DD-MMM-YYYY"
+                },
+                {
+                  "id": "manual.event_information.start_date_ue",
+                  "label": "Start Date UE",
+                  "kind": "text",
+                  "required_marker_observed": false,
+                  "enabled": true
+                },
+                {
+                  "id": "manual.event_information.end_date",
+                  "label": "End Date",
+                  "kind": "date",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "placeholder": "DD-MMM-YYYY"
+                },
+                {
+                  "id": "manual.event_information.end_date_ue",
+                  "label": "End Date Ue",
+                  "kind": "text",
+                  "required_marker_observed": false,
+                  "enabled": true
+                }
+              ],
+              "controls": [
+                {
+                  "label": "Reported Term lookup",
+                  "kind": "icon_button",
+                  "enabled": true,
+                  "note": "Adjacent to Reported Term; not opened."
+                }
+              ]
+            },
+            {
+              "id": "assessment",
+              "name": "Assesment",
+              "fields": [
+                {
+                  "id": "manual.event_information.assessment.case_serious_reporter_code",
+                  "label": "Case Serious Reporter Code",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "seriousness_level",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.assessment.case_serious_company_code",
+                  "label": "Case Serious Company Code",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "seriousness_level",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.assessment.outcome_code",
+                  "label": "Outcome Code",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "outcome_code",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.assessment.lack_of_efficacy",
+                  "label": "Lack Of Efficacy",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                }
+              ]
+            },
+            {
+              "id": "seriousness",
+              "name": "Seriousness",
+              "fields": [
+                {
+                  "id": "manual.event_information.seriousness.death",
+                  "label": "Death",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.seriousness.hospitalization",
+                  "label": "Hospitalization",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.seriousness.life_threatening",
+                  "label": "Life Threatening",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.seriousness.disabling",
+                  "label": "Disabling",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.seriousness.congenital_anomaly",
+                  "label": "Congenital Anomaly",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.seriousness.intervention_required",
+                  "label": "Intervention Required",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.seriousness.medically_significant",
+                  "label": "Medically Significant",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                },
+                {
+                  "id": "manual.event_information.seriousness.others",
+                  "label": "Others",
+                  "kind": "dropdown",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "option_set_ref": "yes_no",
+                  "initial_value": "Select"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "log",
+          "name": "Log",
+          "fields": [],
+          "subsections": [
+            {
+              "id": "activity_log",
+              "name": "Activity Log",
+              "fields": [
+                {
+                  "id": "manual.log.activity_log.search",
+                  "label": "Search...",
+                  "kind": "searchbox",
+                  "required_marker_observed": false,
+                  "enabled": true,
+                  "note": "Grid search; not a case field."
+                }
+              ],
+              "table": {
+                "headers": [
+                  "Open Date",
+                  "Close Date",
+                  "Type",
+                  "Comments",
+                  "Action"
+                ],
+                "observed_rows": 0,
+                "empty_state": "0 of 0"
+              }
+            }
+          ],
+          "controls": [
+            {
+              "label": "Add",
+              "kind": "button",
+              "enabled": true
+            },
+            {
+              "label": "Items per page",
+              "kind": "pagination_setting",
+              "initial_value": "10"
+            }
+          ]
+        }
+      ],
+      "page_actions": [
+        {
+          "label": "Duplicate Search",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        },
+        {
+          "label": "Save",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        },
+        {
+          "label": "Submit",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        },
+        {
+          "label": "Reset",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        }
+      ],
+      "observations": [
+        "Field labels are section-scoped; repeated labels such as First Name(English), Country Code and Title remain distinct by section.",
+        "A required asterisk was observed on nine fields; this records the UI marker, not a verified backend validation rule.",
+        "The Product Name(English) field has a visible required marker while its textbox is disabled in the observed state.",
+        "The Activity Log table showed 0 of 0 rows. No add, search, save, submit, reset, lookup or form-variant action was performed.",
+        "All 25 dropdown controls within the selected Adverse Event form were opened and closed without selecting a value. Country Code (Reporter and Patient) and Formulation Code exposed a Search textbox; their complete option values are intentionally not stored.",
+        "General Inquiry and Medical Inquiry each showed nine dropdown fields: General Info (2), Reporter (5), Product (1), Medical Information (1).",
+        "MI with AE showed the Adverse Event dropdown sections plus Medical Information > Found Answer; its shared option lists are deduplicated by option-set reference.",
+        "Product Quality Complaint showed 11 dropdown fields, including Product Complaint Classification Code, Product Complaint Category Code, and Status Code under Product Complaint Details; its visible form did not include Patient or Event Information sections.",
+        "Country Code and Formulation Code Search controls were confirmed across the inspected variants. Large option lists remain count/search metadata, not full stored values."
+      ],
+      "observed_control_count": {
+        "form_fields": 57,
+        "form_type_selector": 1,
+        "log_searchbox": 1,
+        "total": 59,
+        "by_kind": {
+          "dropdowns_including_form_type": 25,
+          "text_and_date_inputs": 26,
+          "textareas": 5,
+          "switches": 2,
+          "searchboxes": 1
+        }
+      },
+      "dropdown_inventory": {
+        "form_dropdown_controls_checked": 25,
+        "page_size_setting_excluded": true,
+        "all_opened_without_selecting": true,
+        "unique_option_sets_observed": 12,
+        "large_option_sets": [
+          {
+            "label": "Country Code",
+            "sections": [
+              "Reporter",
+              "Patient"
+            ],
+            "option_set_ref": "country_code",
+            "visible_option_count": 258,
+            "search_input_label": "Search",
+            "full_values_embedded": false
+          },
+          {
+            "label": "Formulation Code",
+            "section": "Product",
+            "option_set_ref": "formulation_code",
+            "visible_option_count": 706,
+            "search_input_label": "Search",
+            "full_values_embedded": false
+          }
+        ],
+        "runtime_selection_guidance": "Open the field dropdown, fill its Search textbox with the exact value supplied by the test case, select only one exact matching option, then verify the selected label. Treat zero or multiple matches as unresolved; do not guess."
+      },
+      "variant_dropdown_maps": [
+        {
+          "variant": "General Inquiry",
+          "dropdown_field_count": 9,
+          "fields": [
+            {
+              "id": "manual.variant.general_inquiry.general_info.case_classifications_code",
+              "section": "General Info",
+              "label": "Case Classifications Code",
+              "kind": "dropdown",
+              "option_set_ref": "case_classification",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "General Inquiry"
+            },
+            {
+              "id": "manual.variant.general_inquiry.general_info.case_intake_source_code",
+              "section": "General Info",
+              "label": "Case Intake Source Code",
+              "kind": "dropdown",
+              "option_set_ref": "intake_source",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.general_inquiry.reporter.title",
+              "section": "Reporter",
+              "label": "Title",
+              "kind": "dropdown",
+              "option_set_ref": "title",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.general_inquiry.reporter.sex_code",
+              "section": "Reporter",
+              "label": "Sex Code",
+              "kind": "dropdown",
+              "option_set_ref": "sex_code",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.general_inquiry.reporter.relationship_with_patient_code",
+              "section": "Reporter",
+              "label": "Relationship With Patient Code",
+              "kind": "dropdown",
+              "option_set_ref": "reporter_relationship",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.general_inquiry.reporter.reporter_type_code",
+              "section": "Reporter",
+              "label": "Reporter Type Code",
+              "kind": "dropdown",
+              "option_set_ref": "reporter_type",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.general_inquiry.reporter.country_code",
+              "section": "Reporter",
+              "label": "Country Code",
+              "kind": "dropdown",
+              "option_set_ref": "country_code",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.general_inquiry.product.formulation_code",
+              "section": "Product",
+              "label": "Formulation Code",
+              "kind": "dropdown",
+              "option_set_ref": "formulation_code",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.general_inquiry.medical_information.found_answer",
+              "section": "Medical Information",
+              "label": "Found Answer",
+              "kind": "dropdown",
+              "option_set_ref": "yes_no",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            }
+          ],
+          "option_values_deduplicated": true
+        },
+        {
+          "variant": "Medical Inquiry",
+          "dropdown_field_count": 9,
+          "fields": [
+            {
+              "id": "manual.variant.medical_inquiry.general_info.case_classifications_code",
+              "section": "General Info",
+              "label": "Case Classifications Code",
+              "kind": "dropdown",
+              "option_set_ref": "case_classification",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "Medical Inquiry"
+            },
+            {
+              "id": "manual.variant.medical_inquiry.general_info.case_intake_source_code",
+              "section": "General Info",
+              "label": "Case Intake Source Code",
+              "kind": "dropdown",
+              "option_set_ref": "intake_source",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.medical_inquiry.reporter.title",
+              "section": "Reporter",
+              "label": "Title",
+              "kind": "dropdown",
+              "option_set_ref": "title",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.medical_inquiry.reporter.sex_code",
+              "section": "Reporter",
+              "label": "Sex Code",
+              "kind": "dropdown",
+              "option_set_ref": "sex_code",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.medical_inquiry.reporter.relationship_with_patient_code",
+              "section": "Reporter",
+              "label": "Relationship With Patient Code",
+              "kind": "dropdown",
+              "option_set_ref": "reporter_relationship",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.medical_inquiry.reporter.reporter_type_code",
+              "section": "Reporter",
+              "label": "Reporter Type Code",
+              "kind": "dropdown",
+              "option_set_ref": "reporter_type",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.medical_inquiry.reporter.country_code",
+              "section": "Reporter",
+              "label": "Country Code",
+              "kind": "dropdown",
+              "option_set_ref": "country_code",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.medical_inquiry.product.formulation_code",
+              "section": "Product",
+              "label": "Formulation Code",
+              "kind": "dropdown",
+              "option_set_ref": "formulation_code",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.medical_inquiry.medical_information.found_answer",
+              "section": "Medical Information",
+              "label": "Found Answer",
+              "kind": "dropdown",
+              "option_set_ref": "yes_no",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            }
+          ],
+          "option_values_deduplicated": true
+        },
+        {
+          "variant": "MI with AE",
+          "dropdown_field_count": 25,
+          "inherits_dropdown_fields_from_variant": "Adverse Event",
+          "classification_override": {
+            "section": "General Info",
+            "label": "Case Classifications Code",
+            "initial_value": "MI with AE"
+          },
+          "additional_fields": [
+            {
+              "id": "manual.variant.mi_with_ae.medical_information.found_answer",
+              "section": "Medical Information",
+              "label": "Found Answer",
+              "kind": "dropdown",
+              "option_set_ref": "yes_no",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            }
+          ],
+          "option_values_deduplicated": true,
+          "inspection_note": "The combined form showed the Adverse Event dropdown sections plus Medical Information > Found Answer; shared option sets reference the already inspected sets."
+        },
+        {
+          "variant": "Product Quality Complaint",
+          "dropdown_field_count": 11,
+          "fields": [
+            {
+              "id": "manual.variant.product_quality_complaint.general_info.case_classifications_code",
+              "section": "General Info",
+              "label": "Case Classifications Code",
+              "kind": "dropdown",
+              "option_set_ref": "case_classification",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "Product Quality Complaint"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.general_info.case_intake_source_code",
+              "section": "General Info",
+              "label": "Case Intake Source Code",
+              "kind": "dropdown",
+              "option_set_ref": "intake_source",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.reporter.title",
+              "section": "Reporter",
+              "label": "Title",
+              "kind": "dropdown",
+              "option_set_ref": "title",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.reporter.sex_code",
+              "section": "Reporter",
+              "label": "Sex Code",
+              "kind": "dropdown",
+              "option_set_ref": "sex_code",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.reporter.relationship_with_patient_code",
+              "section": "Reporter",
+              "label": "Relationship With Patient Code",
+              "kind": "dropdown",
+              "option_set_ref": "reporter_relationship",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.reporter.reporter_type_code",
+              "section": "Reporter",
+              "label": "Reporter Type Code",
+              "kind": "dropdown",
+              "option_set_ref": "reporter_type",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.reporter.country_code",
+              "section": "Reporter",
+              "label": "Country Code",
+              "kind": "dropdown",
+              "option_set_ref": "country_code",
+              "required_marker_observed": true,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.product.formulation_code",
+              "section": "Product",
+              "label": "Formulation Code",
+              "kind": "dropdown",
+              "option_set_ref": "formulation_code",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.product_complaint_details.product_complaint_classification_code",
+              "section": "Product Complaint Details",
+              "label": "Product Complaint Classification Code",
+              "kind": "dropdown",
+              "option_set_ref": "product_complaint_classification",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.product_complaint_details.product_complaint_category_code",
+              "section": "Product Complaint Details",
+              "label": "Product Complaint Category Code",
+              "kind": "dropdown",
+              "option_set_ref": "product_complaint_category",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            },
+            {
+              "id": "manual.variant.product_quality_complaint.product_complaint_details.status_code",
+              "section": "Product Complaint Details",
+              "label": "Status Code",
+              "kind": "dropdown",
+              "option_set_ref": "pqc_status_code",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": "Select"
+            }
+          ],
+          "option_values_deduplicated": true
+        }
+      ]
+    },
+    {
+      "id": "open_case",
+      "name": "Open Case",
+      "module": "Intake",
+      "page_heading": "Intake",
+      "breadcrumb": "Intake > Open Case",
+      "url_path": "/dashboard/Intake/Open%20Case",
+      "coverage_status": "search_form_fields_and_dropdowns_observed",
+      "sections": [
+        {
+          "id": "case_intake_search",
+          "name": "Case Intake Search",
+          "fields": [
+            {
+              "id": "open_case.search.case_number",
+              "label": "Case Number",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "open_case.search.case_intake_reference_number",
+              "label": "Case Intake Reference Number",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "open_case.search.product_name",
+              "label": "Product Name",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "product_name_catalog",
+              "initial_value": "Select"
+            },
+            {
+              "id": "open_case.search.case_classifications_code",
+              "label": "Case Classifications Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "case_classification",
+              "initial_value": "Select"
+            },
+            {
+              "id": "open_case.search.case_status_code",
+              "label": "Case Status Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "case_status",
+              "initial_value": "Select"
+            },
+            {
+              "id": "open_case.search.case_intake_source_code",
+              "label": "Case Intake Source Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "intake_source",
+              "initial_value": "Select"
+            },
+            {
+              "id": "open_case.search.first_name",
+              "label": "First Name",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "open_case.search.last_name",
+              "label": "Last Name",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "open_case.search.email_address",
+              "label": "Email Address",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "open_case.search.company_receipt_date_from_date",
+              "label": "Company Receipt Date — From Date",
+              "kind": "date",
+              "required_marker_observed": false,
+              "enabled": true,
+              "placeholder": "DD-MMM-YYYY"
+            },
+            {
+              "id": "open_case.search.company_receipt_date_to_date",
+              "label": "Company Receipt Date — To Date",
+              "kind": "date",
+              "required_marker_observed": false,
+              "enabled": true,
+              "placeholder": "DD-MMM-YYYY"
+            },
+            {
+              "id": "open_case.search.country_code",
+              "label": "Country Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "country_code",
+              "initial_value": "Select"
+            },
+            {
+              "id": "open_case.search.contact_number",
+              "label": "Contact Number",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "page_actions": [
+        {
+          "label": "Search",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        },
+        {
+          "label": "Reset",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        }
+      ],
+      "empty_state": "No search was run; no results were requested or inspected.",
+      "observations": [
+        "Search filters were left blank. Search and Reset were not activated.",
+        "Product Name and Country Code dropdowns were searchable; their inventories are partial."
+      ]
+    },
+    {
+      "id": "case_revision_search",
+      "name": "Case Revision Search",
+      "module": "Intake",
+      "page_heading": "Intake",
+      "breadcrumb": "Intake > Case Revision Search",
+      "url_path": "/dashboard/Intake/Case%20Revision%20Search",
+      "coverage_status": "search_form_fields_observed",
+      "sections": [
+        {
+          "id": "case_revision_search",
+          "name": "Case Revision Search",
+          "fields": [
+            {
+              "id": "case_revision_search.case_number",
+              "label": "Case Number",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "page_actions": [
+        {
+          "label": "Search",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        },
+        {
+          "label": "Reset",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        }
+      ],
+      "empty_state": "No search was run; no results were requested or inspected."
+    },
+    {
+      "id": "case_deletion",
+      "name": "Case Deletion",
+      "module": "Intake",
+      "page_heading": "Intake",
+      "breadcrumb": "Intake > Case Deletion",
+      "url_path": "/dashboard/Intake/Case%20Deletion",
+      "coverage_status": "search_form_fields_and_dropdown_observed",
+      "sections": [
+        {
+          "id": "case_intake_delete_search",
+          "name": "Case Intake Delete Search",
+          "fields": [
+            {
+              "id": "case_deletion.case_number",
+              "label": "Case Number",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            },
+            {
+              "id": "case_deletion.case_intake_source_code",
+              "label": "Case Intake Source Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "intake_source",
+              "initial_value": "Select"
+            },
+            {
+              "id": "case_deletion.webintake_submit",
+              "label": "Webintake Submit",
+              "kind": "switch",
+              "required_marker_observed": false,
+              "enabled": true,
+              "initial_value": false
+            }
+          ]
+        }
+      ],
+      "page_actions": [
+        {
+          "label": "Search",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        },
+        {
+          "label": "Reset",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        }
+      ],
+      "empty_state": "No search was run; no results were requested or inspected."
+    },
+    {
+      "id": "case_explorer",
+      "name": "Case Explorer",
+      "module": "Reports",
+      "page_heading": "Intake",
+      "breadcrumb": "Intake > Reports > Case Explorer",
+      "url_path": "/dashboard/Intake/Reports/Case%20Explorer",
+      "coverage_status": "search_form_fields_and_dropdowns_observed",
+      "sections": [
+        {
+          "id": "case_explorer_box_search",
+          "name": "Case Explorer Box Search",
+          "fields": [
+            {
+              "id": "case_explorer.search.workflow_name",
+              "label": "Workflow Name",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "workflow_name",
+              "initial_value": "Select"
+            },
+            {
+              "id": "case_explorer.search.product_name",
+              "label": "Product Name",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "product_name_catalog",
+              "initial_value": "Select"
+            },
+            {
+              "id": "case_explorer.search.country_code",
+              "label": "Country Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "country_code",
+              "initial_value": "Select"
+            },
+            {
+              "id": "case_explorer.search.case_serious_company_code",
+              "label": "Case Serious Company Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "seriousness_level",
+              "initial_value": "Select"
+            },
+            {
+              "id": "case_explorer.search.case_status_code",
+              "label": "Case Status Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "case_status",
+              "initial_value": "Select"
+            },
+            {
+              "id": "case_explorer.search.case_intake_source_code",
+              "label": "Case Intake Source Code",
+              "kind": "dropdown",
+              "required_marker_observed": false,
+              "enabled": true,
+              "option_set_ref": "intake_source",
+              "initial_value": "Select"
+            },
+            {
+              "id": "case_explorer.search.company_receipt_date_from_date",
+              "label": "Company Receipt Date — From Date",
+              "kind": "date",
+              "required_marker_observed": false,
+              "enabled": true,
+              "placeholder": "DD-MMM-YYYY"
+            },
+            {
+              "id": "case_explorer.search.company_receipt_date_to_date",
+              "label": "Company Receipt Date — To Date",
+              "kind": "date",
+              "required_marker_observed": false,
+              "enabled": true,
+              "placeholder": "DD-MMM-YYYY"
+            },
+            {
+              "id": "case_explorer.search.case_close_date",
+              "label": "Case Close Date",
+              "kind": "date",
+              "required_marker_observed": false,
+              "enabled": true,
+              "placeholder": "DD-MMM-YYYY"
+            }
+          ]
+        }
+      ],
+      "page_actions": [
+        {
+          "label": "Search",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        },
+        {
+          "label": "Reset",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        }
+      ],
+      "empty_state": "No search was run; no results were requested or inspected."
+    },
+    {
+      "id": "audit_history",
+      "name": "Audit History",
+      "module": "Reports",
+      "page_heading": "Intake",
+      "breadcrumb": "Intake > Reports > Audit History",
+      "url_path": "/dashboard/Intake/Reports/Audit%20History",
+      "coverage_status": "search_form_fields_observed",
+      "sections": [
+        {
+          "id": "audit_history",
+          "name": "Audit History",
+          "fields": [
+            {
+              "id": "audit_history.case_number",
+              "label": "Case Number",
+              "kind": "text",
+              "required_marker_observed": false,
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "page_actions": [
+        {
+          "label": "Search",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        },
+        {
+          "label": "Reset",
+          "kind": "button",
+          "enabled": true,
+          "activated": false
+        }
+      ],
+      "empty_state": "No search was run; no audit results were requested or inspected."
+    },
+    {
+      "id": "general_line_listing",
+      "name": "General Line Listing",
+      "module": "Reports",
+      "page_heading": "Intake",
+      "breadcrumb": "Intake > Reports > General Line Listing",
+      "url_path": "/dashboard/Intake/Reports/General%20Line%20Listing",
+      "coverage_status": "visible_list_and_filter_controls_observed; saved row content intentionally omitted",
+      "sections": [
+        {
+          "id": "intake_general_line_listing",
+          "name": "Intake General Line Listing",
+          "fields": [
+            {
+              "id": "general_line_listing.quick_search",
+              "label": "Search...",
+              "kind": "searchbox",
+              "required_marker_observed": false,
+              "enabled": true,
+              "note": "Page-level listing search."
+            },
+            {
+              "id": "general_line_listing.column_search.name",
+              "label": "Name column filter",
+              "kind": "searchbox",
+              "required_marker_observed": false,
+              "enabled": true,
+              "note": "Appeared in the per-column filter row after opening the filter UI."
+            },
+            {
+              "id": "general_line_listing.column_search.description",
+              "label": "Description column filter",
+              "kind": "searchbox",
+              "required_marker_observed": false,
+              "enabled": true,
+              "note": "Appeared in the per-column filter row after opening the filter UI."
+            },
+            {
+              "id": "general_line_listing.column_search.sql_text",
+              "label": "SQL Text column filter",
+              "kind": "searchbox",
+              "required_marker_observed": false,
+              "enabled": true,
+              "note": "Appeared in the per-column filter row after opening the filter UI."
+            },
+            {
+              "id": "general_line_listing.column_search.created_on",
+              "label": "Created On column filter",
+              "kind": "searchbox",
+              "required_marker_observed": false,
+              "enabled": true,
+              "note": "Appeared in the per-column filter row after opening the filter UI."
+            },
+            {
+              "id": "general_line_listing.column_search.created_by_user",
+              "label": "Created By User column filter",
+              "kind": "searchbox",
+              "required_marker_observed": false,
+              "enabled": true,
+              "note": "Appeared in the per-column filter row after opening the filter UI."
+            },
+            {
+              "id": "general_line_listing.column_search.updated_by_user",
+              "label": "Updated By User column filter",
+              "kind": "searchbox",
+              "required_marker_observed": false,
+              "enabled": true,
+              "note": "Appeared in the per-column filter row after opening the filter UI."
+            }
+          ],
+          "table": {
+            "headers": [
+              "Name",
+              "Description",
+              "SQL Text",
+              "Created On",
+              "Created By User",
+              "Updated By User",
+              "Action"
+            ],
+            "observed_row_count": 9,
+            "items_per_page_initial": "10",
+            "record_values_included": false
+          }
+        }
+      ],
+      "filter_dialog": {
+        "name": "Search Filters",
+        "fields": [
+          {
+            "id": "general_line_listing.filter.column",
+            "label": "Column",
+            "kind": "dropdown",
+            "required_marker_observed": false,
+            "enabled": true,
+            "option_set_ref": "listing_filter_column",
+            "initial_value": "Select Columns"
+          },
+          {
+            "id": "general_line_listing.filter.operator",
+            "label": "Operator",
+            "kind": "dropdown",
+            "required_marker_observed": false,
+            "enabled": true,
+            "option_set_ref": "listing_filter_operator",
+            "initial_value": "Select Operator",
+            "note": "No options were exposed before a column was selected; no column was selected."
+          },
+          {
+            "id": "general_line_listing.filter.value",
+            "label": "Value",
+            "kind": "text",
+            "required_marker_observed": false,
+            "enabled": true,
+            "placeholder": "Enter Value"
+          }
+        ],
+        "controls": [
+          {
+            "label": "Add filter row",
+            "kind": "icon_button",
+            "activated": false
+          },
+          {
+            "label": "Delete filter row",
+            "kind": "icon_button",
+            "activated": false
+          },
+          {
+            "label": "Apply",
+            "kind": "button",
+            "activated": false
+          },
+          {
+            "label": "Reset",
+            "kind": "button",
+            "activated": false
+          },
+          {
+            "label": "Cancel",
+            "kind": "button",
+            "activated": false
+          }
+        ]
+      },
+      "page_controls": [
+        {
+          "label": "filter_list",
+          "kind": "button",
+          "activated": true,
+          "note": "Opened filter UI to inspect controls."
+        },
+        {
+          "label": "Add",
+          "kind": "button",
+          "activated": false
+        },
+        {
+          "label": "Submit",
+          "kind": "button",
+          "activated": false
+        },
+        {
+          "label": "Items per page",
+          "kind": "pagination_setting",
+          "initial_value": "10"
+        }
+      ],
+      "observations": [
+        "The page displayed nine existing saved listing definitions after the filter UI was opened.",
+        "Saved names, descriptions, SQL text, creator/updater names, and timestamps are deliberately excluded from this catalogue.",
+        "No definition was opened, edited, added, submitted, or deleted."
+      ]
+    }
+  ],
+  "schema_notes": [
+    "This catalog stores visible labels, section relationships, control kinds, required-marker visibility, current enabled state, placeholders and option-list status; it intentionally omits DOM tags, Angular internals, CSS selectors and implementation-specific IDs.",
+    "required_marker_observed=false means no visible asterisk was observed; it does not prove a field is optional in server validation.",
+    "Counts for searchable option lists describe the options visible when inspected. Large searchable lists are not embedded and should be refreshed from the live product catalog when a plan needs a value."
+  ]
+}
